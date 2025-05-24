@@ -1,0 +1,13 @@
+load("@rules_kotlin//kotlin:jvm.bzl", "kt_jvm_binary")
+
+kt_jvm_binary(
+    name = "main_app",
+    srcs = [
+        "MainApp.kt",
+    ],
+    main_class = "src.MainApp",
+    deps = [
+        "//src/proto:user_proto",
+        "@main//:com_google_protobuf_protobuf_java",
+    ],
+)
