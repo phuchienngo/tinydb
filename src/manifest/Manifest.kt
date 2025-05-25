@@ -111,7 +111,7 @@ class Manifest: Closeable {
 
       dataBuffer = ensureCapacity(dataBuffer, recordSize)
       dataBuffer.clear()
-
+      dataBuffer.position(0).limit(recordSize)
       val readBytes = manifestChannel.read(dataBuffer)
       Preconditions.checkArgument(readBytes == recordSize, "Read size mismatch: expected $recordSize, got $readBytes")
       dataBuffer.flip()

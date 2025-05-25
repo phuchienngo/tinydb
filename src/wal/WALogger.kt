@@ -1,5 +1,6 @@
 package src.wal
 
+import com.google.common.base.Preconditions
 import com.google.common.hash.Hashing
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
@@ -18,15 +19,16 @@ import kotlin.math.min
 
 class WALogger: Closeable {
   companion object {
-    private const val DATA_SIZE = 25
+    private const val BLOCK_SIZE = 32768
+    private const val HEADER_SIZE = 7
     private val LOG: Logger = LoggerFactory.getLogger(WALogger::class.java)
   }
   private val manifest: Manifest
   private val filePath: Path
   private var walSequenceNumber: Long
   private val fileChannel: FileChannel
+  private var currentBlockOffset = 0
   private val hashing = Hashing.crc32c()
-  private val buffer = ByteBuffer.allocateDirect(32)
 
   constructor(dbPath: Path, manifest: Manifest) {
     this.manifest = manifest
@@ -61,70 +63,134 @@ class WALogger: Closeable {
 
   fun recover(memTable: MemTable) {
     fileChannel.position(0)
-    buffer.clear()
-    var temp = ByteBuffer.allocateDirect(1024)
-    var totalSize = 0
+    val buffer = ByteBuffer.allocateDirect(BLOCK_SIZE)
+    var temp: ByteBuffer? = null
     while (fileChannel.read(buffer) != -1) {
       buffer.flip()
-      val blockRecord = BlockRecord.deserialize(buffer)
-      validateChecksum(blockRecord)
-      when (blockRecord.blockType) {
-        BlockRecord.BlockType.FULL -> {
-          val record = WALRecord.parseFrom(blockRecord.data
-            .position(0)
-            .limit(blockRecord.length.toInt())
-          )
-          processWALRecord(record, memTable)
+      parseBuffer@ while (buffer.hasRemaining()) {
+        if (buffer.remaining() <= HEADER_SIZE) {
+          // skip padding bytes
+          break@parseBuffer
         }
-        BlockRecord.BlockType.FIRST -> {
-          temp.clear()
-          temp = ensureCapacity(temp, buffer.limit())
-          totalSize += blockRecord.length
-          temp.put(blockRecord.data)
+        val crc32 = buffer.getInt()
+        val blockType = BlockRecord.BlockType.fromValue(buffer.get())
+        val blockSize = buffer.short.toInt()
+        val data = ByteArray(blockSize)
+        buffer.get(data)
+        val record = BlockRecord(crc32, blockType, ByteBuffer.wrap(data))
+        if (!validateChecksum(record)) {
+          LOG.error("Invalid checksum for block, skipping")
+          continue
         }
-        BlockRecord.BlockType.MIDDLE -> {
-          temp = ensureCapacity(temp, buffer.limit())
-          totalSize += blockRecord.length
-          temp.put(blockRecord.data)
-        }
-        BlockRecord.BlockType.LAST -> {
-          temp = ensureCapacity(temp, buffer.limit())
-          temp.put(blockRecord.data)
-          totalSize += blockRecord.length
-          temp.flip()
-          val record = WALRecord.parseFrom(temp
-            .position(0)
-            .limit(totalSize)
-          )
-          totalSize = 0
-          temp.clear()
-          processWALRecord(record, memTable)
+        when (blockType) {
+          BlockRecord.BlockType.FULL -> {
+            Preconditions.checkArgument(temp == null || temp.capacity() == 0, "Temp buffer should be empty for FULL block")
+            processWALRecord(WALRecord.parseFrom(record.data), memTable)
+          }
+          BlockRecord.BlockType.FIRST -> {
+            Preconditions.checkArgument(temp == null || temp.capacity() == 0, "Temp buffer should be empty for FIRST block")
+            temp?.clear()
+            temp = ensureCapacity(temp, (temp?.capacity() ?: 0) + record.data.capacity())
+            temp.put(record.data)
+          }
+          BlockRecord.BlockType.MIDDLE -> {
+            Preconditions.checkArgument(temp != null && temp.capacity() > 0, "Temp buffer should not be empty for MIDDLE block")
+            temp = ensureCapacity(temp, temp!!.capacity() + record.data.capacity())
+            temp.put(record.data)
+          }
+          BlockRecord.BlockType.LAST -> {
+            Preconditions.checkArgument(temp != null && temp.capacity() > 0, "Temp buffer should not be empty for LAST block")
+            temp = ensureCapacity(temp, temp!!.capacity() + record.data.capacity())
+            temp.put(record.data)
+            temp.flip()
+            processWALRecord(WALRecord.parseFrom(temp), memTable)
+            temp.clear()
+          }
         }
       }
       buffer.clear()
     }
-    buffer.clear()
     fileChannel.position(fileChannel.size())
   }
 
   private fun appendLog(walRecord: WALRecord) {
     val serializedLog = walRecord.toByteArray()
-    val serializedSize = walRecord.serializedSize
-    for (offset in 0 until serializedSize step DATA_SIZE) {
-      buffer.clear()
-      val length = min(DATA_SIZE, serializedLog.size - offset)
-      val crc32 = calculateChecksum(serializedLog, offset, length)
-      val blockType = getBlockType(offset, length)
-      val data = ByteBuffer.wrap(serializedLog, offset, length)
-      val record = BlockRecord(crc32, blockType, length.toShort(), data)
-      record.serialize(buffer)
-      while (buffer.position() < buffer.limit()) {
-        buffer.put(0.toByte())
+    val serializedSize = serializedLog.size
+    if (serializedSize + HEADER_SIZE <= BLOCK_SIZE - currentBlockOffset) {
+      currentBlockOffset += writeBlock(serializedLog, 0, BlockRecord.BlockType.FULL)
+      if (paddingBlock()) {
+        currentBlockOffset = 0
       }
-      buffer.flip()
-      fileChannel.write(buffer)
-      fileChannel.force(true)
+      return
     }
+
+    if (paddingBlock()) {
+      currentBlockOffset = 0
+    }
+
+    if (serializedSize + HEADER_SIZE <= BLOCK_SIZE - currentBlockOffset) {
+      currentBlockOffset += writeBlock(serializedLog, 0, BlockRecord.BlockType.FULL)
+      return
+    }
+
+    var offset = writeBlock(serializedLog, 0, BlockRecord.BlockType.FIRST)
+    currentBlockOffset += offset
+
+    while (serializedSize - offset + HEADER_SIZE > BLOCK_SIZE - currentBlockOffset) {
+      if (paddingBlock()) {
+        currentBlockOffset = 0
+      }
+      val written = writeBlock(serializedLog, offset, BlockRecord.BlockType.MIDDLE)
+      offset += written
+      currentBlockOffset += written
+    }
+
+    if (paddingBlock()) {
+      currentBlockOffset = 0
+    }
+    currentBlockOffset += writeBlock(serializedLog, offset, BlockRecord.BlockType.LAST)
+    if (paddingBlock()) {
+      currentBlockOffset = 0
+    }
+    fileChannel.force(true)
+  }
+
+  private fun writeBlock(data: ByteArray, offset: Int, blockType: BlockRecord.BlockType): Int {
+    val expectedSize = HEADER_SIZE + data.size - offset
+    val writtenSize = min(expectedSize, BLOCK_SIZE - currentBlockOffset)
+    val blockDataSize = writtenSize - HEADER_SIZE
+    val buffer = ByteBuffer.allocateDirect(writtenSize)
+    val crc32 = calculateChecksum(data, offset, writtenSize)
+    buffer.putInt(crc32)
+    buffer.put(blockType.value)
+    buffer.putShort(blockDataSize.toShort())
+    buffer.put(data, offset, blockDataSize)
+    buffer.flip()
+    try {
+      while (buffer.hasRemaining()) {
+        fileChannel.write(buffer)
+      }
+      return blockDataSize
+    } catch (e: Exception) {
+      LOG.error("[writeBlock] Failed to write block to WAL", e)
+      throw e
+    }
+  }
+
+  private fun paddingBlock(): Boolean {
+    if (BLOCK_SIZE - currentBlockOffset > HEADER_SIZE) {
+      return false
+    }
+    val paddingSize = BLOCK_SIZE - currentBlockOffset
+    val buffer = ByteBuffer.allocateDirect(paddingSize)
+    val b = 0.toByte()
+    while (buffer.hasRemaining()) {
+      buffer.put(b)
+    }
+    buffer.flip()
+    fileChannel.write(buffer)
+    fileChannel.force(true)
+    return true
   }
 
   override fun close() {
@@ -141,18 +207,10 @@ class WALogger: Closeable {
     return hashing.hashBytes(data, offset, length).asInt()
   }
 
-  private fun getBlockType(offset: Int, length: Int): BlockRecord.BlockType {
-    return when {
-      offset == 0 && length <= DATA_SIZE -> BlockRecord.BlockType.FULL
-      offset == 0 && length > DATA_SIZE-> BlockRecord.BlockType.FIRST
-      offset > 0 && length <= DATA_SIZE -> BlockRecord.BlockType.LAST
-      else -> BlockRecord.BlockType.MIDDLE
-    }
-  }
-
-  private fun ensureCapacity(currentBuffer: ByteBuffer, requestSize: Int): ByteBuffer {
-    if (currentBuffer.capacity() < requestSize) {
+  private fun ensureCapacity(currentBuffer: ByteBuffer?, requestSize: Int): ByteBuffer {
+    if (currentBuffer == null || currentBuffer.capacity() < requestSize) {
       val newBuffer = ByteBuffer.allocateDirect(requestSize)
+      currentBuffer?.flip() ?: return newBuffer
       newBuffer.put(currentBuffer)
       return newBuffer
     }
