@@ -4,15 +4,17 @@ load("@protobuf//bazel:java_proto_library.bzl", "java_proto_library")
 package(default_visibility = ["//visibility:public"])
 
 proto_library(
-    name = "user",
+    name = "proto",
     srcs = [
-        "user.proto",
+        "manifest.proto",
+        "memtable.proto",
+        "wal.proto",
     ],
 )
 
 java_proto_library(
-    name = "user_proto",
+    name = "java_proto",
     deps = [
-        ":user",
+        ":proto",
     ],
 )

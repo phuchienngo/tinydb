@@ -3,11 +3,20 @@ load("@rules_kotlin//kotlin:jvm.bzl", "kt_jvm_binary")
 kt_jvm_binary(
     name = "main_app",
     srcs = [
+        "DBLock.kt",
+        "LiteDB.kt",
         "MainApp.kt",
+        "manifest/Manifest.kt",
+        "memtable/MemTable.kt",
+        "wal/BlockRecord.kt",
+        "wal/WALogger.kt",
     ],
     main_class = "src.MainApp",
     deps = [
-        "//src/proto:user_proto",
+        "//src/proto:java_proto",
+        "@main//:com_google_guava_guava",
         "@main//:com_google_protobuf_protobuf_java",
+        "@main//:org_slf4j_slf4j_api",
+        "@main//:org_slf4j_slf4j_simple",
     ],
 )

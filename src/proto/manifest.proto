@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "src.proto.manifest";
+
+package src.proto.manifest;
+
+message ManifestRecord {
+  oneof record {
+    AddFile add_file = 1;
+    RemoveFile remove_file = 2;
+    CompactManifest compact_manifest = 3;
+    BatchOperation batch_operation = 4;
+    int64 current_wal = 5;
+    int64 current_manifest = 6;
+  }
+}
+
+message FileInfo {
+  enum FileType {
+    SS_TABLE = 0;
+    WAL = 1;
+    MANIFEST = 2;
+  }
+  int64 index = 1;
+  FileType file_type = 2;
+}
+
+message CompactManifest {
+  repeated FileInfo files = 1;
+  int64 current_wal = 2;
+  int64 current_manifest = 3;
+}
+
+message AddFile {
+  repeated FileInfo files = 1;
+}
+
+message RemoveFile {
+  repeated FileInfo files = 1;
+}
+
+message BatchOperation {
+  repeated ManifestRecord records = 1;
+}
