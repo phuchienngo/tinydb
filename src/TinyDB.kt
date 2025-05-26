@@ -2,10 +2,9 @@ package src
 
 import com.google.common.base.Preconditions
 import java.io.Closeable
-import java.nio.file.Files
 import java.nio.file.Path
 
-class LiteDB: Closeable {
+class TinyDB: Closeable {
   private val path: Path
   private val dbLock: DBLock
 

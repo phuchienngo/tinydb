@@ -13,7 +13,7 @@ message BlockHandle {
 }
 
 message PropertiesBlock {
-  map<string, string> properties = 1;
+  map<string, bytes> properties = 1;
 }
 
 message MetaIndexData {

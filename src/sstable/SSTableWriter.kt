@@ -1,6 +1,10 @@
 package src.sstable
 
+import com.google.common.primitives.Ints
+import com.google.common.primitives.Longs
+import com.google.protobuf.ByteString
 import src.proto.memtable.MemTableEntry
+import src.proto.memtable.MemTableKey
 import src.proto.sstable.BlockHandle
 import src.proto.sstable.PropertiesBlock
 import java.io.Closeable
@@ -12,47 +16,52 @@ import java.nio.file.StandardOpenOption
 class SSTableWriter(
   dbPath: Path,
   ssTableIndex: Long,
-  level: Int,
+  level: Long,
   private val blockSize: Int,
   restartInterval: Int
 ): Closeable {
-  private val filePath = dbPath.resolve("SSTable-$level-$ssTableIndex")
+  private val filePath = dbPath.resolve("SSTABLE-$level-$ssTableIndex")
   private val channel = FileChannel.open(
     filePath,
     StandardOpenOption.TRUNCATE_EXISTING,
     StandardOpenOption.CREATE,
     StandardOpenOption.APPEND
   )
-  private val dataBlockBuilder = DataBlockBuilder(restartInterval, channel)
+  private val dataBlockWriter = DataBlockWriter(restartInterval, channel)
   private val indexBlockBuilder = IndexBlockBuilder()
   private val metaIndexBlockBuilder = MetaIndexBlockBuilder()
   private val bloomFilterBuilder = BloomFilterBuilder(100000, 0.01)
+  private var minKey = MemTableKey.getDefaultInstance()
+  private var maxKey = MemTableKey.getDefaultInstance()
   private var recordCount = 0
   private var currentOffset = 0L
 
   fun add(memTableEntry: MemTableEntry) {
     val recordSize = estimateRecordSize(memTableEntry)
-    val estimatedNextSize = dataBlockBuilder.writtenSize() + recordSize
+    val estimatedNextSize = dataBlockWriter.writtenSize() + recordSize
     if (estimatedNextSize > blockSize) {
-      flushDataBlock()
+      setupNewDataBlock()
     }
-    dataBlockBuilder.write(memTableEntry)
+    dataBlockWriter.write(memTableEntry)
     bloomFilterBuilder.add(memTableEntry.key)
     recordCount += 1
+    minKey = minOf(minKey, memTableEntry.key)
+    maxKey = maxOf(maxKey, memTableEntry.key)
   }
 
   fun finish(): Footer {
-    flushDataBlock() // finish the last data block
+    setupNewDataBlock() // finish the last data block
 
     // properties
     val bloomFilter = bloomFilterBuilder.finish()
     val indexBlock = indexBlockBuilder.finish()
+    val dataSize = currentOffset
     val bloomFilterHandler = writeBlock(bloomFilter)
-    val propertiesHandle = writePropertiesBlock(indexBlock.size)
+    val propertiesHandle = writePropertiesBlock(indexBlock.size, dataSize)
 
     // meta index
-    metaIndexBlockBuilder.add("bloom_filter", bloomFilterHandler)
-    metaIndexBlockBuilder.add("stats", propertiesHandle)
+    metaIndexBlockBuilder.addBloomFilterHandle(bloomFilterHandler)
+    metaIndexBlockBuilder.addStatsHandle(propertiesHandle)
     val metaIndexHandle = writeBlock(metaIndexBlockBuilder.finish())
     // index
     val indexHandle = writeBlock(indexBlock)
@@ -71,24 +80,26 @@ class SSTableWriter(
     channel.close()
   }
 
-  private fun writePropertiesBlock(indexSize: Int): BlockHandle {
+  private fun writePropertiesBlock(indexSize: Int, dataSize: Long): BlockHandle {
     val propertiesBlock = PropertiesBlock.newBuilder()
-      .putProperties("entries", "$recordCount")
-      .putProperties("dataSize", "$currentOffset")
-      .putProperties("indexSize", "$indexSize")
+      .putProperties("entries", ByteString.copyFrom(Ints.toByteArray(recordCount)))
+      .putProperties("dataSize", ByteString.copyFrom(Longs.toByteArray(dataSize)))
+      .putProperties("indexSize", ByteString.copyFrom(Ints.toByteArray(indexSize)))
+      .putProperties("minKey", minKey.toByteString())
+      .putProperties("maxKey", maxKey.toByteString())
       .build()
     return writeBlock(propertiesBlock.toByteArray())
   }
 
-  private fun flushDataBlock() {
-    val lastKey = dataBlockBuilder.lastKey()
+  private fun setupNewDataBlock() {
+    val lastKey = dataBlockWriter.lastKey()
     val blockHandle = BlockHandle.newBuilder()
       .setOffset(channel.position())
-      .setSize(dataBlockBuilder.writtenSize().toLong())
+      .setSize(dataBlockWriter.writtenSize().toLong())
       .build()
     indexBlockBuilder.add(lastKey, blockHandle)
-    dataBlockBuilder.finish()
-    dataBlockBuilder.reset()
+    dataBlockWriter.finish()
+    dataBlockWriter.reset()
     currentOffset = channel.position()
   }
 
@@ -110,5 +121,15 @@ class SSTableWriter(
 
   private fun estimateRecordSize(memTableEntry: MemTableEntry): Int {
     return memTableEntry.serializedSize + 4
+  }
+
+  private fun minOf(a: MemTableKey, b: MemTableKey): MemTableKey {
+    val comparison = ByteString.unsignedLexicographicalComparator().compare(a.key, b.key)
+    return if (comparison <= 0) a else b
+  }
+
+  private fun maxOf(a: MemTableKey, b: MemTableKey): MemTableKey {
+    val comparison = ByteString.unsignedLexicographicalComparator().compare(a.key, b.key)
+    return if (comparison <= 0) b else a
   }
 }

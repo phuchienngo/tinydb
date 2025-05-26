@@ -16,6 +16,7 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
+import kotlin.math.max
 
 class Manifest: Closeable {
   companion object {
@@ -24,6 +25,7 @@ class Manifest: Closeable {
   }
   private val dbPath: Path
   private val currentSSTables: Multimap<Long, Long>
+  private var currentSSTableIndex: Long
   private var currentWalIndex: Long
   private var currentManifestIndex: Long
   private lateinit var manifestChannel: FileChannel
@@ -33,6 +35,7 @@ class Manifest: Closeable {
     currentSSTables = ArrayListMultimap.create()
     currentWalIndex = 0
     currentManifestIndex = 0
+    currentSSTableIndex = 0
     initialize()
   }
 
@@ -137,18 +140,21 @@ class Manifest: Closeable {
         val changes = record.addFile
         for (fileInfo in changes.filesList) {
           currentSSTables.put(fileInfo.level, fileInfo.index)
+          currentSSTableIndex = max(currentSSTableIndex, fileInfo.index)
         }
       }
       ManifestRecord.RecordCase.REMOVE_FILE -> {
         val changes = record.removeFile
         for (fileInfo in changes.filesList) {
           currentSSTables.remove(fileInfo.level, fileInfo.index)
+          currentSSTableIndex = max(currentSSTableIndex, fileInfo.index)
         }
       }
       ManifestRecord.RecordCase.COMPACT_MANIFEST -> {
         currentSSTables.clear()
         currentWalIndex = record.compactManifest.currentWal
         currentManifestIndex = record.compactManifest.currentManifest
+        currentSSTableIndex = record.currentSsTable
         for (fileInfo in record.compactManifest.filesList) {
           currentSSTables.put(fileInfo.level, fileInfo.index)
         }
@@ -165,6 +171,9 @@ class Manifest: Closeable {
       ManifestRecord.RecordCase.CURRENT_MANIFEST -> {
         currentManifestIndex = record.currentManifest
       }
+      ManifestRecord.RecordCase.CURRENT_SS_TABLE -> {
+        currentSSTableIndex = record.currentSsTable
+      }
       ManifestRecord.RecordCase.RECORD_NOT_SET -> {
         throw IllegalStateException("Record not set in manifest record")
       }
@@ -180,6 +189,7 @@ class Manifest: Closeable {
     val compactManifestBuilder = CompactManifest.newBuilder()
       .setCurrentManifest(newManifestIndex)
       .setCurrentWal(currentWalIndex)
+      .setCurrentSsTable(currentSSTableIndex)
     for (level in currentSSTables.keySet()) {
       for (fileIndex in currentSSTables.get(level)) {
         val ssTableFile = SSTableFile.newBuilder()

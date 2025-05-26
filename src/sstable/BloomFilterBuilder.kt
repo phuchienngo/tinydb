@@ -1,8 +1,6 @@
 package src.sstable
 
 import com.google.common.hash.BloomFilter
-import com.google.common.hash.Funnel
-import com.google.common.hash.PrimitiveSink
 import src.proto.memtable.MemTableKey
 import java.io.ByteArrayOutputStream
 
@@ -19,12 +17,6 @@ class BloomFilterBuilder(
 
   fun add(memTableKey: MemTableKey) {
     bloomFilter.put(memTableKey)
-  }
-
-  private class MemTableKeyFunnel: Funnel<MemTableKey> {
-    override fun funnel(from: MemTableKey, into: PrimitiveSink) {
-      into.putBytes(from.toByteArray())
-    }
   }
 
   fun finish(): ByteArray {

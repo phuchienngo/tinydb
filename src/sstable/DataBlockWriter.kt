@@ -5,7 +5,7 @@ import src.proto.memtable.MemTableKey
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
 
-class DataBlockBuilder(
+class DataBlockWriter(
   private val restartInterval: Int,
   private val fileChannel: FileChannel
 ) {
