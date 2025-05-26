@@ -42,21 +42,10 @@ class WALogger: Closeable {
     )
   }
 
-  fun put(memTableKey: MemTableKey, memTableValue: MemTableValue, sequenceNumber: Long) {
+  fun put(memTableKey: MemTableKey, memTableValue: MemTableValue) {
     val record = WALRecord.newBuilder()
       .setKey(memTableKey)
       .setValue(memTableValue)
-      .setOperation(WALRecord.Operation.PUT)
-      .setSequenceNumber(sequenceNumber)
-      .build()
-    appendLog(record)
-  }
-
-  fun delete(memTableKey: MemTableKey, sequenceNumber: Long) {
-    val record = WALRecord.newBuilder()
-      .setKey(memTableKey)
-      .setOperation(WALRecord.Operation.DELETE)
-      .setSequenceNumber(sequenceNumber)
       .build()
     appendLog(record)
   }
@@ -218,11 +207,7 @@ class WALogger: Closeable {
   }
 
   private fun processWALRecord(record: WALRecord, memTable: MemTable) {
-    when (record.operation) {
-      WALRecord.Operation.PUT -> memTable.put(record.key.toByteArray(), record.value.toByteArray())
-      WALRecord.Operation.DELETE -> memTable.delete(record.key.toByteArray())
-      WALRecord.Operation.UNRECOGNIZED -> LOG.error("Unrecognized WAL operation")
-    }
+    memTable.put(record.key, record.value)
   }
 
   private fun validateChecksum(record: BlockRecord): Boolean {

@@ -10,6 +10,14 @@ message MemTableKey {
 }
 
 message MemTableValue {
-  bytes value = 1;
-  bool tombstone = 2;
+  oneof data {
+    bytes value = 1;
+    bool tombstone = 2;
+  }
+  int64 sequence = 3;
+}
+
+message MemTableEntry {
+  MemTableKey key = 1;
+  MemTableValue value = 2;
 }

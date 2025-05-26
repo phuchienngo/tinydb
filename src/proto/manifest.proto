@@ -16,28 +16,23 @@ message ManifestRecord {
   }
 }
 
-message FileInfo {
-  enum FileType {
-    SS_TABLE = 0;
-    WAL = 1;
-    MANIFEST = 2;
-  }
+message SSTableFile {
   int64 index = 1;
-  FileType file_type = 2;
+  int64 level = 2;
 }
 
 message CompactManifest {
-  repeated FileInfo files = 1;
+  repeated SSTableFile files = 1;
   int64 current_wal = 2;
   int64 current_manifest = 3;
 }
 
 message AddFile {
-  repeated FileInfo files = 1;
+  repeated SSTableFile files = 1;
 }
 
 message RemoveFile {
-  repeated FileInfo files = 1;
+  repeated SSTableFile files = 1;
 }
 
 message BatchOperation {

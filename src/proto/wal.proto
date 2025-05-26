@@ -8,12 +8,6 @@ package src.proto.wal;
 import "src/proto/memtable.proto";
 
 message WALRecord {
-  enum Operation {
-    PUT = 0;
-    DELETE = 1;
-  }
-  int64 sequence_number = 1;
-  Operation operation = 2;
-  src.proto.memtable.MemTableKey key = 3;
-  src.proto.memtable.MemTableValue value = 4;
+  src.proto.memtable.MemTableKey key = 1;
+  src.proto.memtable.MemTableValue value = 2;
 }

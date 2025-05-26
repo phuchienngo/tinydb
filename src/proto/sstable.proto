@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "src.proto.sstable";
+
+package src.proto.sstable;
+
+import "src/proto/memtable.proto";
+
+message BlockHandle {
+  int64 offset = 1;
+  int64 size = 2;
+}
+
+message PropertiesBlock {
+  map<string, string> properties = 1;
+}
+
+message MetaIndexData {
+  map<string, BlockHandle> meta_index = 1;
+}
+
+message IndexData {
+  message Entry {
+    src.proto.memtable.MemTableKey last_key = 1;
+    BlockHandle block_handle = 2;
+  }
+  repeated Entry entry = 1;
+}

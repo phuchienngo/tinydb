@@ -7,8 +7,8 @@ import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import src.proto.manifest.BatchOperation
 import src.proto.manifest.CompactManifest
-import src.proto.manifest.FileInfo
 import src.proto.manifest.ManifestRecord
+import src.proto.manifest.SSTableFile
 import java.io.Closeable
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
@@ -23,14 +23,14 @@ class Manifest: Closeable {
     private val LOG: Logger = LoggerFactory.getLogger(Manifest::class.java)
   }
   private val dbPath: Path
-  private val inUsedFiles: Multimap<FileInfo.FileType, Long>
+  private val currentSSTables: Multimap<Long, Long>
   private var currentWalIndex: Long
   private var currentManifestIndex: Long
   private lateinit var manifestChannel: FileChannel
 
   constructor(dbPath: Path) {
     this.dbPath = dbPath
-    inUsedFiles = ArrayListMultimap.create()
+    currentSSTables = ArrayListMultimap.create()
     currentWalIndex = 0
     currentManifestIndex = 0
     initialize()
@@ -44,8 +44,8 @@ class Manifest: Closeable {
     return currentManifestIndex
   }
 
-  fun getInUsedFiles(fileType: FileInfo.FileType): List<Long> {
-    return inUsedFiles.get(fileType).toList()
+  fun committedSSTables(): Multimap<Long, Long> {
+    return currentSSTables
   }
 
   fun commitChanges(batchOperation: BatchOperation) {
@@ -100,7 +100,7 @@ class Manifest: Closeable {
   private fun recoverManifestFiles() {
     val manifestFile = dbPath.resolve("MANIFEST-$currentManifestIndex")
     Preconditions.checkArgument(Files.exists(manifestFile), "Manifest file does not exist: $manifestFile")
-    manifestChannel = FileChannel.open(manifestFile, StandardOpenOption.APPEND, StandardOpenOption.READ)
+    manifestChannel = FileChannel.open(manifestFile, StandardOpenOption.READ)
     val recordSizeBuffer = ByteBuffer.allocateDirect(4)
     var dataBuffer: ByteBuffer? = null
     while (manifestChannel.read(recordSizeBuffer) != -1) {
@@ -120,6 +120,8 @@ class Manifest: Closeable {
 
       applyManifestRecord(record)
     }
+    manifestChannel.close()
+    manifestChannel = FileChannel.open(manifestFile, StandardOpenOption.APPEND)
   }
 
   private fun ensureCapacity(buffer: ByteBuffer?, size: Int): ByteBuffer {
@@ -134,21 +136,21 @@ class Manifest: Closeable {
       ManifestRecord.RecordCase.ADD_FILE -> {
         val changes = record.addFile
         for (fileInfo in changes.filesList) {
-          inUsedFiles.put(fileInfo.fileType, fileInfo.index)
+          currentSSTables.put(fileInfo.level, fileInfo.index)
         }
       }
       ManifestRecord.RecordCase.REMOVE_FILE -> {
         val changes = record.removeFile
         for (fileInfo in changes.filesList) {
-          inUsedFiles.remove(fileInfo.fileType, fileInfo.index)
+          currentSSTables.remove(fileInfo.level, fileInfo.index)
         }
       }
       ManifestRecord.RecordCase.COMPACT_MANIFEST -> {
-        inUsedFiles.clear()
+        currentSSTables.clear()
         currentWalIndex = record.compactManifest.currentWal
         currentManifestIndex = record.compactManifest.currentManifest
         for (fileInfo in record.compactManifest.filesList) {
-          inUsedFiles.put(fileInfo.fileType, fileInfo.index)
+          currentSSTables.put(fileInfo.level, fileInfo.index)
         }
       }
       ManifestRecord.RecordCase.BATCH_OPERATION -> {
@@ -178,13 +180,13 @@ class Manifest: Closeable {
     val compactManifestBuilder = CompactManifest.newBuilder()
       .setCurrentManifest(newManifestIndex)
       .setCurrentWal(currentWalIndex)
-    for (fileType in inUsedFiles.keySet()) {
-      for (fileIndex in inUsedFiles.get(fileType)) {
-        val fileInfo = FileInfo.newBuilder()
-          .setFileType(fileType)
+    for (level in currentSSTables.keySet()) {
+      for (fileIndex in currentSSTables.get(level)) {
+        val ssTableFile = SSTableFile.newBuilder()
           .setIndex(fileIndex)
+          .setLevel(level)
           .build()
-        compactManifestBuilder.addFiles(fileInfo)
+        compactManifestBuilder.addFiles(ssTableFile)
       }
     }
     val compactManifest = compactManifestBuilder.build()
@@ -214,7 +216,7 @@ class Manifest: Closeable {
     try {
       val currentFileChannel = FileChannel.open(
         dbPath.resolve("CURRENT"),
-        StandardOpenOption.WRITE,
+        StandardOpenOption.APPEND,
         StandardOpenOption.TRUNCATE_EXISTING
       )
       currentFileChannel.truncate(0)
@@ -229,6 +231,7 @@ class Manifest: Closeable {
       return
     }
 
+    manifestChannel.force(true)
     manifestChannel.close()
     manifestChannel = newManifestChannel
     currentManifestIndex = newManifestIndex

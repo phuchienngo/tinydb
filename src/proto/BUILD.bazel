@@ -8,6 +8,7 @@ proto_library(
     srcs = [
         "manifest.proto",
         "memtable.proto",
+        "sstable.proto",
         "wal.proto",
     ],
 )
