@@ -40,10 +40,6 @@ class Manifest: Closeable {
     return currentWalIndex
   }
 
-  fun committedManifestIndex(): Long {
-    return currentManifestIndex
-  }
-
   fun committedSSTableIndex(): Long {
     return currentSSTableIndex
   }
@@ -64,7 +60,7 @@ class Manifest: Closeable {
       manifestChannel.force(true)
     } catch (e: Exception) {
       LOG.error("[commitChanges] Failed to commit changes to manifest", e)
-      return
+      throw e
     }
     for (change in batchOperation.recordsList) {
       applyManifestRecord(change)
@@ -212,7 +208,7 @@ class Manifest: Closeable {
       newManifestChannel.force(true)
     } catch (e: Exception) {
       LOG.error("[compactIfNeeded] Failed to create new manifest file", e)
-      return
+      throw e
     }
 
     try {

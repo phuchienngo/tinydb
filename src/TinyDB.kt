@@ -14,6 +14,7 @@ import src.sstable.SSTableReader
 import src.sstable.SSTableWriter
 import src.wal.WALogger
 import java.io.Closeable
+import java.nio.file.Path
 
 class TinyDB: Closeable {
   private val config: Config
@@ -21,7 +22,7 @@ class TinyDB: Closeable {
   private val manifest: Manifest
   private var walLogger: WALogger
   private val memTable: MemTable
-  private val openingSSTables: MultiKeyMap<Long, SSTableReader>
+  private val openingSSTables: MutableMap<Long, SSTableReader>
   private var sequenceNumber: Long
 
   constructor(config: Config) {
@@ -32,11 +33,22 @@ class TinyDB: Closeable {
     walLogger = WALogger(dbPath, manifest)
     memTable = MemTable()
     sequenceNumber = walLogger.recover(memTable)
-    openingSSTables = MultiKeyMap()
-    for (fileIndex in manifest.committedSSTableIndexes()) {
+    openingSSTables = mutableMapOf()
+    openSSTables(dbPath)
+  }
+
+  private fun openSSTables(dbPath: Path) {
+    val listSSTableIndexes = manifest.committedSSTableIndexes()
+    val openingSSTableIndexes = openingSSTables.keys
+    for (openingIndex in openingSSTableIndexes) {
+      if (listSSTableIndexes.contains(openingIndex)) {
+        continue // Already opened
+      }
+      openingSSTables.remove(openingIndex)?.close() // Remove stale SSTable
+    }
+    for (fileIndex in listSSTableIndexes) {
       val ssTableReader = SSTableReader(dbPath, fileIndex)
-      val level = ssTableReader.getLevel()
-      openingSSTables.put(level, fileIndex, ssTableReader)
+      openingSSTables.put(fileIndex, ssTableReader)
     }
   }
 
@@ -128,6 +140,7 @@ class TinyDB: Closeable {
     walLogger = WALogger(config.dbPath, manifest)
     memTable.clear()
     walLogger.recover(memTable)
+    openSSTables(config.dbPath)
   }
 
   private fun persistMemTableEntry(ssTableWriter: SSTableWriter) {

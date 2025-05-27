@@ -1,8 +1,8 @@
 module(
-    name = "litedb",
+    name = "tinydb",
     version = "1.0.0",
     compatibility_level = 1,
-    repo_name = "litedb",
+    repo_name = "tinydb",
 )
 
 bazel_dep(name = "rules_java", version = "8.11.0")
