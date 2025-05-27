@@ -2,24 +2,31 @@ package src
 
 import com.google.protobuf.ByteString
 import org.apache.commons.collections4.map.MultiKeyMap
+import src.config.Config
 import src.manifest.Manifest
 import src.memtable.MemTable
+import src.proto.manifest.BatchOperation
+import src.proto.manifest.ManifestRecord
+import src.proto.memtable.MemTableEntry
 import src.proto.memtable.MemTableKey
 import src.proto.memtable.MemTableValue
 import src.sstable.SSTableReader
+import src.sstable.SSTableWriter
 import src.wal.WALogger
 import java.io.Closeable
-import java.nio.file.Path
 
 class TinyDB: Closeable {
+  private val config: Config
   private val dbLock: DBLock
   private val manifest: Manifest
   private var walLogger: WALogger
-  private var memTable: MemTable
+  private val memTable: MemTable
   private val openingSSTables: MultiKeyMap<Long, SSTableReader>
   private var sequenceNumber: Long
 
-  constructor(dbPath: Path) {
+  constructor(config: Config) {
+    this.config = config
+    val dbPath = config.dbPath
     dbLock = DBLock(dbPath)
     manifest = Manifest(dbPath)
     walLogger = WALogger(dbPath, manifest)
@@ -67,7 +74,7 @@ class TinyDB: Closeable {
       .build()
     val memTableValue = MemTableValue.newBuilder()
       .setValue(ByteString.copyFrom(value))
-      .setSequence(sequenceNumber + 1)
+      .setSequence(manifest.committedWalIndex() + 1)
       .build()
     return internalPut(memTableKey, memTableValue)
   }
@@ -90,6 +97,47 @@ class TinyDB: Closeable {
   }
 
   private fun internalPut(memTableKey: MemTableKey, memTableValue: MemTableValue) {
+    walLogger.put(memTableKey, memTableValue)
+    memTable.put(memTableKey, memTableValue)
+    sequenceNumber += 1
+    if (memTable.getEntriesCount() < config.memTableSizeLimit && memTable.getMemTableSize() < config.memTableSizeLimit) {
+      return
+    }
+    writeMemTableToSSTable()
+  }
 
+  private fun writeMemTableToSSTable() {
+    val oldWalIndex = manifest.committedWalIndex()
+    val nextSSTableIndex = manifest.committedSSTableIndex() + 1
+    val nextWalIndex = oldWalIndex + 1
+    val ssTableWriter = SSTableWriter(
+      config.dbPath,
+      nextSSTableIndex,
+      0,
+      config.ssTableBlockSize,
+      config.ssTableRestartInterval
+    )
+    persistMemTableEntry(ssTableWriter)
+    ssTableWriter.close()
+    val batchOperation = BatchOperation.newBuilder()
+      .addRecords(ManifestRecord.newBuilder().setCurrentSsTable(nextSSTableIndex).build())
+      .addRecords(ManifestRecord.newBuilder().setCurrentWal(nextWalIndex).build())
+      .build()
+    manifest.commitChanges(batchOperation)
+    walLogger.destroy()
+    walLogger = WALogger(config.dbPath, manifest)
+    memTable.clear()
+    walLogger.recover(memTable)
+  }
+
+  private fun persistMemTableEntry(ssTableWriter: SSTableWriter) {
+    for ((memTableKey, memTableValue) in memTable.getMemTableEntries()) {
+      val entry = MemTableEntry.newBuilder()
+        .setKey(memTableKey)
+        .setValue(memTableValue)
+        .build()
+      ssTableWriter.add(entry)
+    }
+    ssTableWriter.finish()
   }
 }

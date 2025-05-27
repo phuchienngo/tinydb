@@ -6,6 +6,8 @@ kt_jvm_binary(
         "DBLock.kt",
         "MainApp.kt",
         "TinyDB.kt",
+        "comparator/MemTableKeyComparator.kt",
+        "config/Config.kt",
         "manifest/Manifest.kt",
         "memtable/MemTable.kt",
         "sstable/BloomFilterBuilder.kt",

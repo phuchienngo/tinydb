@@ -1,13 +1,18 @@
 package src.memtable
 
+import src.comparator.MemTableKeyComparator
 import src.proto.memtable.MemTableKey
 import src.proto.memtable.MemTableValue
 import java.util.concurrent.ConcurrentSkipListMap
 import java.util.concurrent.atomic.AtomicLong
 
 class MemTable {
-  private val skipList = ConcurrentSkipListMap<MemTableKey, MemTableValue>()
+  private val skipList = ConcurrentSkipListMap<MemTableKey, MemTableValue>(MemTableKeyComparator.INSTANCE)
   private val tableSize = AtomicLong(0)
+
+  fun getMemTableEntries(): Set<Map.Entry<MemTableKey, MemTableValue>> {
+    return skipList.entries
+  }
 
   fun getMemTableSize(): Long {
     return tableSize.get()
@@ -23,6 +28,11 @@ class MemTable {
 
   fun put(memTableKey: MemTableKey, memTableValue: MemTableValue) {
     internalPut(memTableKey, memTableValue)
+  }
+
+  fun clear() {
+    skipList.clear()
+    tableSize.set(0)
   }
 
   private fun internalPut(memTableKey: MemTableKey, memTableValue: MemTableValue) {

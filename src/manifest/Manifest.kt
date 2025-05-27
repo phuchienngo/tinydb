@@ -44,6 +44,10 @@ class Manifest: Closeable {
     return currentManifestIndex
   }
 
+  fun committedSSTableIndex(): Long {
+    return currentSSTableIndex
+  }
+
   fun committedSSTableIndexes(): Set<Long> {
     return currentSSTables
   }
