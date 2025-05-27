@@ -1,14 +1,11 @@
 package src.manifest
 
 import com.google.common.base.Preconditions
-import com.google.common.collect.ArrayListMultimap
-import com.google.common.collect.Multimap
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import src.proto.manifest.BatchOperation
 import src.proto.manifest.CompactManifest
 import src.proto.manifest.ManifestRecord
-import src.proto.manifest.SSTableFile
 import java.io.Closeable
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
@@ -24,7 +21,7 @@ class Manifest: Closeable {
     private val LOG: Logger = LoggerFactory.getLogger(Manifest::class.java)
   }
   private val dbPath: Path
-  private val currentSSTables: Multimap<Long, Long>
+  private val currentSSTables: MutableSet<Long>
   private var currentSSTableIndex: Long
   private var currentWalIndex: Long
   private var currentManifestIndex: Long
@@ -32,7 +29,7 @@ class Manifest: Closeable {
 
   constructor(dbPath: Path) {
     this.dbPath = dbPath
-    currentSSTables = ArrayListMultimap.create()
+    currentSSTables = mutableSetOf()
     currentWalIndex = 0
     currentManifestIndex = 0
     currentSSTableIndex = 0
@@ -47,7 +44,7 @@ class Manifest: Closeable {
     return currentManifestIndex
   }
 
-  fun committedSSTables(): Multimap<Long, Long> {
+  fun committedSSTableIndexes(): Set<Long> {
     return currentSSTables
   }
 
@@ -138,16 +135,15 @@ class Manifest: Closeable {
     when (record.recordCase) {
       ManifestRecord.RecordCase.ADD_FILE -> {
         val changes = record.addFile
-        for (fileInfo in changes.filesList) {
-          currentSSTables.put(fileInfo.level, fileInfo.index)
-          currentSSTableIndex = max(currentSSTableIndex, fileInfo.index)
+        for (fileIndex in changes.ssTableIndexList) {
+          currentSSTables.add(fileIndex)
+          currentSSTableIndex = max(currentSSTableIndex, fileIndex)
         }
       }
       ManifestRecord.RecordCase.REMOVE_FILE -> {
         val changes = record.removeFile
-        for (fileInfo in changes.filesList) {
-          currentSSTables.remove(fileInfo.level, fileInfo.index)
-          currentSSTableIndex = max(currentSSTableIndex, fileInfo.index)
+        for (fileIndex in changes.ssTableIndexList) {
+          currentSSTables.remove(fileIndex)
         }
       }
       ManifestRecord.RecordCase.COMPACT_MANIFEST -> {
@@ -155,8 +151,8 @@ class Manifest: Closeable {
         currentWalIndex = record.compactManifest.currentWal
         currentManifestIndex = record.compactManifest.currentManifest
         currentSSTableIndex = record.currentSsTable
-        for (fileInfo in record.compactManifest.filesList) {
-          currentSSTables.put(fileInfo.level, fileInfo.index)
+        for (fileIndex in record.compactManifest.ssTableIndexList) {
+          currentSSTables.add(fileIndex)
         }
       }
       ManifestRecord.RecordCase.BATCH_OPERATION -> {
@@ -186,20 +182,12 @@ class Manifest: Closeable {
       return
     }
     val newManifestIndex = currentManifestIndex + 1
-    val compactManifestBuilder = CompactManifest.newBuilder()
+    val compactManifest = CompactManifest.newBuilder()
       .setCurrentManifest(newManifestIndex)
       .setCurrentWal(currentWalIndex)
       .setCurrentSsTable(currentSSTableIndex)
-    for (level in currentSSTables.keySet()) {
-      for (fileIndex in currentSSTables.get(level)) {
-        val ssTableFile = SSTableFile.newBuilder()
-          .setIndex(fileIndex)
-          .setLevel(level)
-          .build()
-        compactManifestBuilder.addFiles(ssTableFile)
-      }
-    }
-    val compactManifest = compactManifestBuilder.build()
+      .addAllSsTableIndex(currentSSTables)
+      .build()
     val buffer = ByteBuffer.allocateDirect(4 + compactManifest.serializedSize)
     buffer.putInt(compactManifest.serializedSize)
     buffer.put(compactManifest.toByteArray())

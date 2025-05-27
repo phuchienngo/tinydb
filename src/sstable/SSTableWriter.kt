@@ -1,7 +1,5 @@
 package src.sstable
 
-import com.google.common.primitives.Ints
-import com.google.common.primitives.Longs
 import com.google.protobuf.ByteString
 import src.proto.memtable.MemTableEntry
 import src.proto.memtable.MemTableKey
@@ -15,12 +13,12 @@ import java.nio.file.StandardOpenOption
 
 class SSTableWriter(
   dbPath: Path,
-  ssTableIndex: Long,
-  level: Long,
+  private val ssTableIndex: Long,
+  private val level: Long,
   private val blockSize: Int,
   restartInterval: Int
 ): Closeable {
-  private val filePath = dbPath.resolve("SSTABLE-$level-$ssTableIndex")
+  private val filePath = dbPath.resolve("SSTABLE-$ssTableIndex")
   private val channel = FileChannel.open(
     filePath,
     StandardOpenOption.TRUNCATE_EXISTING,
@@ -82,11 +80,13 @@ class SSTableWriter(
 
   private fun writePropertiesBlock(indexSize: Int, dataSize: Long): BlockHandle {
     val propertiesBlock = PropertiesBlock.newBuilder()
-      .putProperties("entries", ByteString.copyFrom(Ints.toByteArray(recordCount)))
-      .putProperties("dataSize", ByteString.copyFrom(Longs.toByteArray(dataSize)))
-      .putProperties("indexSize", ByteString.copyFrom(Ints.toByteArray(indexSize)))
-      .putProperties("minKey", minKey.toByteString())
-      .putProperties("maxKey", maxKey.toByteString())
+      .setEntries(recordCount)
+      .setDataSize(dataSize)
+      .setSsTableIndex(ssTableIndex)
+      .setLevel(level)
+      .setIndexSize(indexSize.toLong())
+      .setMinKey(minKey)
+      .setMaxKey(maxKey)
       .build()
     return writeBlock(propertiesBlock.toByteArray())
   }

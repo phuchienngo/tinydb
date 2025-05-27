@@ -17,24 +17,19 @@ message ManifestRecord {
   }
 }
 
-message SSTableFile {
-  int64 index = 1;
-  int64 level = 2;
-}
-
 message CompactManifest {
-  repeated SSTableFile files = 1;
+  repeated int64 ss_table_index = 1;
   int64 current_wal = 2;
   int64 current_manifest = 3;
   int64 current_ss_table = 4;
 }
 
 message AddFile {
-  repeated SSTableFile files = 1;
+  repeated int64 ss_table_index = 1;
 }
 
 message RemoveFile {
-  repeated SSTableFile files = 1;
+  repeated int64 ss_table_index = 1;
 }
 
 message BatchOperation {

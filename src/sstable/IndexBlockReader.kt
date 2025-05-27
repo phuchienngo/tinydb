@@ -21,8 +21,8 @@ class IndexBlockReader {
     }
   }
 
-  fun getBlockHandle(lastKey: MemTableKey): BlockHandle? {
-    return blockList[lastKey]
+  fun getBlockHandles(): List<BlockHandle> {
+    return blockList.values.toList()
   }
 
   fun findBlockHandle(memTableKey: MemTableKey): BlockHandle? {

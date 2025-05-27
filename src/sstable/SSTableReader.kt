@@ -1,7 +1,6 @@
 package src.sstable
 
-import com.google.common.primitives.Ints
-import com.google.common.primitives.Longs
+import com.google.common.collect.Iterators
 import src.proto.memtable.MemTableEntry
 import src.proto.memtable.MemTableKey
 import src.proto.sstable.BlockHandle
@@ -11,7 +10,7 @@ import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
 import java.nio.file.Path
 
-class SSTableReader: Closeable {
+class SSTableReader: Closeable, Iterable<MemTableEntry> {
   private val footer: Footer
   private val indexBlockReader: IndexBlockReader
   private val metaIndexBlockReader: MetaIndexBlockReader
@@ -22,10 +21,12 @@ class SSTableReader: Closeable {
   private val maxKey: MemTableKey
   private val dataSize: Long
   private val entries: Int
+  private val ssTableIndex: Long
+  private val level: Long
 
-  constructor(dbPath: Path, ssTableIndex: Long, level: Long) {
+  constructor(dbPath: Path, ssTableIndex: Long) {
     fileChannel = FileChannel.open(
-      dbPath.resolve("SSTABLE-$level-$ssTableIndex"),
+      dbPath.resolve("SSTABLE-$ssTableIndex"),
       java.nio.file.StandardOpenOption.READ
     )
     footer = readFooter()
@@ -35,12 +36,13 @@ class SSTableReader: Closeable {
     bloomFilterReader = BloomFilterReader(readBlock(bloomFilterHandle))
     val propertiesHandle = metaIndexBlockReader.getStatsBlockHandle()
     val propertiesBlock = PropertiesBlock.parseFrom(readBlock(propertiesHandle))
-    val properties = propertiesBlock.propertiesMap
     blockCache = mutableMapOf<BlockHandle, DataBlockReader>()
-    minKey = MemTableKey.parseFrom(properties["minKey"])
-    maxKey = MemTableKey.parseFrom(properties["maxKey"])
-    dataSize = Longs.fromByteArray(properties["dataSize"]!!.toByteArray())
-    entries = Ints.fromByteArray(properties["entries"]!!.toByteArray())
+    minKey = propertiesBlock.minKey
+    maxKey = propertiesBlock.maxKey
+    dataSize = propertiesBlock.dataSize
+    entries = propertiesBlock.entries
+    this.ssTableIndex = propertiesBlock.ssTableIndex
+    this.level = propertiesBlock.level
   }
 
   fun get(memTableKey: MemTableKey): MemTableEntry? {
@@ -51,15 +53,19 @@ class SSTableReader: Closeable {
     if (blockHandle == null) {
       return null
     }
-    val dataBlockReader = if (blockCache.containsKey(blockHandle)) {
-      blockCache[blockHandle]!!
-    } else {
-      val dataBlock = readBlock(blockHandle)
-      val blockReader = DataBlockReader(dataBlock)
-      blockCache[blockHandle] = blockReader
-      blockReader
-    }
+    val dataBlockReader = getOrLoadBlockHandle(blockHandle)
     return dataBlockReader.get(memTableKey)
+  }
+
+  fun getLevel(): Long {
+    return level
+  }
+
+  private fun getOrLoadBlockHandle(blockHandle: BlockHandle): DataBlockReader {
+    return blockCache.computeIfAbsent(blockHandle) {
+      val dataBlock = readBlock(it)
+      return@computeIfAbsent DataBlockReader(dataBlock)
+    }
   }
 
   private fun readFooter(): Footer {
@@ -86,5 +92,14 @@ class SSTableReader: Closeable {
 
   override fun close() {
     fileChannel.close()
+    blockCache.clear()
+  }
+
+  override fun iterator(): Iterator<MemTableEntry> {
+    val iterators = indexBlockReader.getBlockHandles()
+      .map(::getOrLoadBlockHandle)
+      .map(DataBlockReader::iterator)
+    // TODO: Lazy loading of iterators
+    return Iterators.concat(*iterators.toTypedArray())
   }
 }

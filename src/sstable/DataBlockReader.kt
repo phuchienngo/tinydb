@@ -5,7 +5,7 @@ import src.proto.memtable.MemTableEntry
 import src.proto.memtable.MemTableKey
 import java.nio.ByteBuffer
 
-class DataBlockReader {
+class DataBlockReader: Iterable<MemTableEntry> {
   private val blockData: ByteArray
   private val dataSize: Int
   private val restartPoints: List<Int>
@@ -71,5 +71,22 @@ class DataBlockReader {
     return MemTableEntry.parseFrom(buffer.limit(buffer.position() + size))
   }
 
+  override fun iterator(): Iterator<MemTableEntry> {
+    return object: Iterator<MemTableEntry> {
+      private var currentOffset = 0
 
+      override fun hasNext(): Boolean {
+        return currentOffset < dataSize
+      }
+
+      override fun next(): MemTableEntry {
+        if (!hasNext()) {
+          throw NoSuchElementException("No more entries in the data block")
+        }
+        val entry = getEntryAtOffset(currentOffset)
+        currentOffset += entry.serializedSize + 4
+        return entry
+      }
+    }
+  }
 }

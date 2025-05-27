@@ -6,15 +6,16 @@ import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import src.manifest.Manifest
 import src.memtable.MemTable
+import src.proto.memtable.MemTableEntry
 import src.proto.memtable.MemTableKey
 import src.proto.memtable.MemTableValue
-import src.proto.wal.WALRecord
 import java.io.Closeable
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
+import kotlin.math.max
 import kotlin.math.min
 
 class WALogger: Closeable {
@@ -43,17 +44,18 @@ class WALogger: Closeable {
   }
 
   fun put(memTableKey: MemTableKey, memTableValue: MemTableValue) {
-    val record = WALRecord.newBuilder()
+    val record = MemTableEntry.newBuilder()
       .setKey(memTableKey)
       .setValue(memTableValue)
       .build()
     appendLog(record)
   }
 
-  fun recover(memTable: MemTable) {
+  fun recover(memTable: MemTable): Long {
     fileChannel.position(0)
     val buffer = ByteBuffer.allocateDirect(BLOCK_SIZE)
     var temp: ByteBuffer? = null
+    var logSequence = 0L
     while (fileChannel.read(buffer) != -1) {
       buffer.flip()
       parseBuffer@ while (buffer.hasRemaining()) {
@@ -74,7 +76,7 @@ class WALogger: Closeable {
         when (blockType) {
           BlockRecord.BlockType.FULL -> {
             Preconditions.checkArgument(temp == null || temp.capacity() == 0, "Temp buffer should be empty for FULL block")
-            processWALRecord(WALRecord.parseFrom(record.data), memTable)
+            logSequence = max(logSequence, processWALRecord(MemTableEntry.parseFrom(record.data), memTable))
           }
           BlockRecord.BlockType.FIRST -> {
             Preconditions.checkArgument(temp == null || temp.capacity() == 0, "Temp buffer should be empty for FIRST block")
@@ -92,7 +94,7 @@ class WALogger: Closeable {
             temp = ensureCapacity(temp, temp!!.capacity() + record.data.capacity())
             temp.put(record.data)
             temp.flip()
-            processWALRecord(WALRecord.parseFrom(temp), memTable)
+            logSequence = max(logSequence, processWALRecord(MemTableEntry.parseFrom(temp), memTable))
             temp.clear()
           }
         }
@@ -100,10 +102,11 @@ class WALogger: Closeable {
       buffer.clear()
     }
     fileChannel.position(fileChannel.size())
+    return logSequence
   }
 
-  private fun appendLog(walRecord: WALRecord) {
-    val serializedLog = walRecord.toByteArray()
+  private fun appendLog(memTableEntry: MemTableEntry) {
+    val serializedLog = memTableEntry.toByteArray()
     val serializedSize = serializedLog.size
     if (serializedSize + HEADER_SIZE <= BLOCK_SIZE - currentBlockOffset) {
       currentBlockOffset += writeBlock(serializedLog, 0, BlockRecord.BlockType.FULL)
@@ -206,8 +209,9 @@ class WALogger: Closeable {
     return currentBuffer
   }
 
-  private fun processWALRecord(record: WALRecord, memTable: MemTable) {
-    memTable.put(record.key, record.value)
+  private fun processWALRecord(memTableEntry: MemTableEntry, memTable: MemTable): Long {
+    memTable.put(memTableEntry.key, memTableEntry.value)
+    return memTableEntry.value.sequence
   }
 
   private fun validateChecksum(record: BlockRecord): Boolean {

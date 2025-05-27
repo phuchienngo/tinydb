@@ -20,6 +20,7 @@ maven.install(
     artifacts = [
         "com.google.guava:guava:33.4.8-jre",
         "com.google.protobuf:protobuf-java:4.31.0",
+        "org.apache.commons:commons-collections4:4.5.0",
         "org.jetbrains.kotlin:kotlin-stdlib:2.1.20",
         "org.jetbrains:annotations:26.0.2",
         "org.slf4j:slf4j-api:2.0.17",

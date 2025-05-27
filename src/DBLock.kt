@@ -1,19 +1,23 @@
 package src
 
 import java.io.Closeable
-import java.io.File
-import java.io.RandomAccessFile
 import java.nio.channels.FileChannel
 import java.nio.channels.FileLock
+import java.nio.file.Path
+import java.nio.file.StandardOpenOption
 
 class DBLock: Closeable {
-  private val lockFile: File
   private val channel: FileChannel
   private val lock: FileLock?
 
-  constructor(lockFile: File) {
-    this.lockFile = lockFile
-    this.channel = RandomAccessFile(lockFile, "rw").channel
+  constructor(dbPath: Path) {
+    val lockPath = dbPath.resolve("LOCK")
+    this.channel = FileChannel.open(
+      lockPath,
+      StandardOpenOption.CREATE,
+      StandardOpenOption.WRITE,
+      StandardOpenOption.READ
+    )
     try {
       this.lock = channel.tryLock()
     } catch (e: Exception) {
@@ -22,7 +26,7 @@ class DBLock: Closeable {
     }
 
     if (lock == null) {
-      throw IllegalStateException("Unable to acquire lock on $lockFile")
+      throw IllegalStateException("Unable to acquire lock on $dbPath")
     }
   }
 

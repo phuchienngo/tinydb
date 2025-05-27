@@ -13,6 +13,10 @@ class MemTable {
     return tableSize.get()
   }
 
+  fun getEntriesCount(): Int {
+    return skipList.size
+  }
+
   fun get(memTableKey: MemTableKey): MemTableValue? {
     return skipList[memTableKey]
   }
