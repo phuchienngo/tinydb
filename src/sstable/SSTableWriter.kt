@@ -6,10 +6,8 @@ import src.proto.memtable.MemTableKey
 import src.proto.sstable.BlockHandle
 import src.proto.sstable.PropertiesBlock
 import java.io.Closeable
-import java.nio.ByteBuffer
-import java.nio.channels.FileChannel
+import java.io.RandomAccessFile
 import java.nio.file.Path
-import java.nio.file.StandardOpenOption
 
 class SSTableWriter(
   dbPath: Path,
@@ -18,14 +16,9 @@ class SSTableWriter(
   private val blockSize: Int,
   restartInterval: Int
 ): Closeable {
-  private val filePath = dbPath.resolve("SSTABLE-$ssTableIndex")
-  private val channel = FileChannel.open(
-    filePath,
-    StandardOpenOption.TRUNCATE_EXISTING,
-    StandardOpenOption.CREATE,
-    StandardOpenOption.APPEND
-  )
-  private val dataBlockWriter = DataBlockWriter(restartInterval, channel)
+  private val filePath = dbPath.resolve("${ssTableIndex}.sstable")
+  private val randomAccessFile = RandomAccessFile(filePath.toFile(), "w")
+  private val dataBlockWriter = DataBlockWriter(restartInterval, randomAccessFile)
   private val indexBlockBuilder = IndexBlockBuilder()
   private val metaIndexBlockBuilder = MetaIndexBlockBuilder()
   private val bloomFilterBuilder = BloomFilterBuilder(100000, 0.01)
@@ -66,16 +59,14 @@ class SSTableWriter(
     // footer
     val footer = Footer(metaIndexHandle, indexHandle)
     val footerBuffer = footer.serialize()
-    while (footerBuffer.hasRemaining()) {
-      channel.write(footerBuffer)
-    }
-    channel.force(true)
+    randomAccessFile.write(footerBuffer)
+    randomAccessFile.fd.sync()
     return footer
   }
 
   override fun close() {
-    channel.force(true)
-    channel.close()
+    randomAccessFile.fd.sync()
+    randomAccessFile.close()
   }
 
   private fun writePropertiesBlock(indexSize: Int, dataSize: Long): BlockHandle {
@@ -94,24 +85,19 @@ class SSTableWriter(
   private fun setupNewDataBlock() {
     val lastKey = dataBlockWriter.lastKey()
     val blockHandle = BlockHandle.newBuilder()
-      .setOffset(channel.position())
+      .setOffset(randomAccessFile.filePointer)
       .setSize(dataBlockWriter.writtenSize().toLong())
       .build()
     indexBlockBuilder.add(lastKey, blockHandle)
     dataBlockWriter.finish()
     dataBlockWriter.reset()
-    currentOffset = channel.position()
+    currentOffset = randomAccessFile.filePointer
   }
 
   private fun writeBlock(data: ByteArray): BlockHandle {
     val offset = currentOffset
-    val buffer = ByteBuffer.allocateDirect(data.size)
-    buffer.put(data)
-    buffer.flip()
-    while (buffer.hasRemaining()) {
-      channel.write(buffer)
-    }
-    channel.force(true)
+    randomAccessFile.write(data)
+    randomAccessFile.fd.sync()
     currentOffset += data.size
     return BlockHandle.newBuilder()
       .setSize(offset)

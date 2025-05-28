@@ -9,8 +9,9 @@ data class Footer(val metaIndexHandle: BlockHandle, val indexHandle: BlockHandle
     private const val FOOTER_SIZE = 40
   }
 
-  fun serialize(): ByteBuffer {
-    val buffer = ByteBuffer.allocateDirect(FOOTER_SIZE)
+  fun serialize(): ByteArray {
+    val bytes = ByteArray(FOOTER_SIZE)
+    val buffer = ByteBuffer.wrap(bytes)
 
     buffer.putLong(metaIndexHandle.offset)
     buffer.putLong(metaIndexHandle.size)
@@ -19,6 +20,6 @@ data class Footer(val metaIndexHandle: BlockHandle, val indexHandle: BlockHandle
     buffer.putLong(MAGIC_NUMBER)
     buffer.flip()
 
-    return buffer
+    return bytes
   }
 }

@@ -1,10 +1,10 @@
 package src
 
 import com.google.protobuf.ByteString
-import org.apache.commons.collections4.map.MultiKeyMap
 import src.config.Config
 import src.manifest.Manifest
 import src.memtable.MemTable
+import src.proto.manifest.AddFile
 import src.proto.manifest.BatchOperation
 import src.proto.manifest.ManifestRecord
 import src.proto.memtable.MemTableEntry
@@ -12,7 +12,8 @@ import src.proto.memtable.MemTableKey
 import src.proto.memtable.MemTableValue
 import src.sstable.SSTableReader
 import src.sstable.SSTableWriter
-import src.wal.WALogger
+import src.wal.LogReader
+import src.wal.LogWriter
 import java.io.Closeable
 import java.nio.file.Path
 
@@ -20,7 +21,7 @@ class TinyDB: Closeable {
   private val config: Config
   private val dbLock: DBLock
   private val manifest: Manifest
-  private var walLogger: WALogger
+  private var walLogger: LogWriter
   private val memTable: MemTable
   private val openingSSTables: MutableMap<Long, SSTableReader>
   private var sequenceNumber: Long
@@ -30,9 +31,11 @@ class TinyDB: Closeable {
     val dbPath = config.dbPath
     dbLock = DBLock(dbPath)
     manifest = Manifest(dbPath)
-    walLogger = WALogger(dbPath, manifest)
     memTable = MemTable()
-    sequenceNumber = walLogger.recover(memTable)
+    val logReader = LogReader(dbPath, manifest)
+    sequenceNumber = logReader.recover(memTable)
+    logReader.close()
+    walLogger = LogWriter(dbPath, manifest)
     openingSSTables = mutableMapOf()
     openSSTables(dbPath)
   }
@@ -105,6 +108,9 @@ class TinyDB: Closeable {
   override fun close() {
     manifest.close()
     walLogger.close()
+    for (ssTableReader in openingSSTables.values) {
+      ssTableReader.close()
+    }
     dbLock.close()
   }
 
@@ -132,14 +138,22 @@ class TinyDB: Closeable {
     persistMemTableEntry(ssTableWriter)
     ssTableWriter.close()
     val batchOperation = BatchOperation.newBuilder()
-      .addRecords(ManifestRecord.newBuilder().setCurrentSsTable(nextSSTableIndex).build())
-      .addRecords(ManifestRecord.newBuilder().setCurrentWal(nextWalIndex).build())
-      .build()
+      .addRecords(ManifestRecord.newBuilder()
+        .setCurrentSsTable(nextSSTableIndex)
+        .build()
+      ).addRecords(ManifestRecord.newBuilder()
+        .setCurrentWal(nextWalIndex)
+        .build()
+      ).addRecords(ManifestRecord.newBuilder()
+        .setAddFile(AddFile.newBuilder()
+          .addSsTableIndex(nextSSTableIndex)
+          .build()
+        ).build()
+      ).build()
     manifest.commitChanges(batchOperation)
     walLogger.destroy()
-    walLogger = WALogger(config.dbPath, manifest)
+    walLogger = LogWriter(config.dbPath, manifest)
     memTable.clear()
-    walLogger.recover(memTable)
     openSSTables(config.dbPath)
   }
 

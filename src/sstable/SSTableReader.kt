@@ -1,13 +1,14 @@
 package src.sstable
 
+import com.google.common.base.Preconditions
 import com.google.common.collect.Iterators
 import src.proto.memtable.MemTableEntry
 import src.proto.memtable.MemTableKey
 import src.proto.sstable.BlockHandle
 import src.proto.sstable.PropertiesBlock
 import java.io.Closeable
+import java.io.RandomAccessFile
 import java.nio.ByteBuffer
-import java.nio.channels.FileChannel
 import java.nio.file.Path
 
 class SSTableReader: Closeable, Iterable<MemTableEntry> {
@@ -15,7 +16,7 @@ class SSTableReader: Closeable, Iterable<MemTableEntry> {
   private val indexBlockReader: IndexBlockReader
   private val metaIndexBlockReader: MetaIndexBlockReader
   private val bloomFilterReader: BloomFilterReader
-  private val fileChannel: FileChannel
+  private val randomAccessFile: RandomAccessFile
   private val blockCache: MutableMap<BlockHandle, DataBlockReader>
   private val minKey: MemTableKey
   private val maxKey: MemTableKey
@@ -25,10 +26,8 @@ class SSTableReader: Closeable, Iterable<MemTableEntry> {
   private val level: Long
 
   constructor(dbPath: Path, ssTableIndex: Long) {
-    fileChannel = FileChannel.open(
-      dbPath.resolve("SSTABLE-$ssTableIndex"),
-      java.nio.file.StandardOpenOption.READ
-    )
+    val filePath = dbPath.resolve("${ssTableIndex}.sstable").toFile()
+    randomAccessFile = RandomAccessFile(filePath, "r")
     footer = readFooter()
     indexBlockReader = IndexBlockReader(readBlock(footer.indexHandle))
     metaIndexBlockReader = MetaIndexBlockReader(readBlock(footer.metaIndexHandle))
@@ -69,9 +68,11 @@ class SSTableReader: Closeable, Iterable<MemTableEntry> {
   }
 
   private fun readFooter(): Footer {
-    fileChannel.position(fileChannel.size() - 40)
-    val buffer = ByteBuffer.allocateDirect(40)
-    fileChannel.read(buffer)
+    randomAccessFile.seek(randomAccessFile.length() - 40)
+    val bytes = ByteArray(40)
+    val readBytes = randomAccessFile.read(bytes)
+    Preconditions.checkArgument(readBytes == 40, "Footer size mismatch")
+    val buffer = ByteBuffer.wrap(bytes)
     val metaIndexHandle = BlockHandle.newBuilder()
       .setOffset(buffer.long)
       .setSize(buffer.long)
@@ -84,14 +85,15 @@ class SSTableReader: Closeable, Iterable<MemTableEntry> {
   }
 
   private fun readBlock(handle: BlockHandle): ByteArray {
-    val buffer = ByteBuffer.allocateDirect(handle.size.toInt())
-    fileChannel.position(handle.offset)
-    fileChannel.read(buffer)
-    return buffer.array()
+    val bytes = ByteArray(handle.size.toInt())
+    randomAccessFile.seek(handle.offset)
+    val readBytes = randomAccessFile.read(bytes)
+    Preconditions.checkArgument(readBytes == bytes.size, "Block size mismatch")
+    return bytes
   }
 
   override fun close() {
-    fileChannel.close()
+    randomAccessFile.close()
     blockCache.clear()
   }
 

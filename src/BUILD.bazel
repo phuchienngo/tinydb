@@ -23,7 +23,8 @@ kt_jvm_binary(
         "sstable/SSTableReader.kt",
         "sstable/SSTableWriter.kt",
         "wal/BlockRecord.kt",
-        "wal/WALogger.kt",
+        "wal/LogReader.kt",
+        "wal/LogWriter.kt",
     ],
     main_class = "src.MainApp",
     deps = [

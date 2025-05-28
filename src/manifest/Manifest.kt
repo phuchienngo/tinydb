@@ -7,12 +7,11 @@ import src.proto.manifest.BatchOperation
 import src.proto.manifest.CompactManifest
 import src.proto.manifest.ManifestRecord
 import java.io.Closeable
+import java.io.RandomAccessFile
 import java.nio.ByteBuffer
-import java.nio.channels.FileChannel
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.StandardOpenOption
 import kotlin.math.max
 
 class Manifest: Closeable {
@@ -25,7 +24,7 @@ class Manifest: Closeable {
   private var currentSSTableIndex: Long
   private var currentWalIndex: Long
   private var currentManifestIndex: Long
-  private lateinit var manifestChannel: FileChannel
+  private lateinit var randomAccessFile: RandomAccessFile
 
   constructor(dbPath: Path) {
     this.dbPath = dbPath
@@ -49,15 +48,12 @@ class Manifest: Closeable {
   }
 
   fun commitChanges(batchOperation: BatchOperation) {
-    val buffer = ByteBuffer.allocateDirect(4 + batchOperation.serializedSize)
-    buffer.putInt(batchOperation.serializedSize)
-    buffer.put(batchOperation.toByteArray())
-    buffer.flip()
+    val serializedSize = batchOperation.serializedSize
+    val byteArray = batchOperation.toByteArray()
     try {
-      while (buffer.hasRemaining()) {
-        manifestChannel.write(buffer)
-      }
-      manifestChannel.force(true)
+      randomAccessFile.write(serializedSize)
+      randomAccessFile.write(byteArray)
+      randomAccessFile.fd.sync()
     } catch (e: Exception) {
       LOG.error("[commitChanges] Failed to commit changes to manifest", e)
       throw e
@@ -69,7 +65,8 @@ class Manifest: Closeable {
   }
 
   override fun close() {
-    manifestChannel.close()
+    randomAccessFile.fd.sync()
+    randomAccessFile.close()
   }
 
   private fun initialize() {
@@ -77,58 +74,41 @@ class Manifest: Closeable {
     if (!Files.exists(current)) {
       LOG.debug("[initialize] Creating CURRENT file")
       Files.createFile(current)
-      Files.createFile(dbPath.resolve("MANIFEST-0"))
+      Files.createFile(dbPath.resolve("0.manifest"))
       return
     }
 
-    val channel = FileChannel.open(current, StandardOpenOption.READ)
-    if (channel.size() == 0L) {
+    val currentRandomAccessFile = RandomAccessFile(current.toFile(), "r")
+    if (currentRandomAccessFile.length() == 0L) {
       LOG.debug("[initialize] CURRENT file is empty => ignoring")
       return
     }
-    val buffer = ByteBuffer.allocateDirect(channel.size().toInt())
-    channel.read(buffer)
-    channel.close()
-    buffer.flip()
-    val currentManifestFile = StandardCharsets.US_ASCII.decode(buffer).toString()
-    val regex = Regex.fromLiteral("MANIFEST-([0-9]+)")
+    val byteArray = ByteArray(currentRandomAccessFile.length().toInt())
+    val readBytes = currentRandomAccessFile.read(byteArray)
+    Preconditions.checkArgument(readBytes == byteArray.size, "Failed to read CURRENT file")
+    val currentManifestFile = StandardCharsets.US_ASCII.decode(ByteBuffer.wrap(byteArray)).toString()
+    val regex = Regex.fromLiteral("\\d+\\.manifest")
     Preconditions.checkArgument(currentManifestFile.matches(regex), "Invalid CURRENT file format")
-    currentManifestIndex = currentManifestFile.removePrefix("MANIFEST-").toLong()
+    currentManifestIndex = currentManifestFile.substring(0, currentManifestFile.indexOf(".")).toLong()
     recoverManifestFiles()
   }
 
   private fun recoverManifestFiles() {
-    val manifestFile = dbPath.resolve("MANIFEST-$currentManifestIndex")
-    Preconditions.checkArgument(Files.exists(manifestFile), "Manifest file does not exist: $manifestFile")
-    manifestChannel = FileChannel.open(manifestFile, StandardOpenOption.READ)
-    val recordSizeBuffer = ByteBuffer.allocateDirect(4)
-    var dataBuffer: ByteBuffer? = null
-    while (manifestChannel.read(recordSizeBuffer) != -1) {
-      recordSizeBuffer.flip()
-      Preconditions.checkArgument(recordSizeBuffer.remaining() == 4, "Record size buffer must be 4 bytes")
-      val recordSize = recordSizeBuffer.int
-      recordSizeBuffer.clear()
-
-      dataBuffer = ensureCapacity(dataBuffer, recordSize)
-      dataBuffer.clear()
-      dataBuffer.position(0).limit(recordSize)
-      val readBytes = manifestChannel.read(dataBuffer)
+    val manifestFile = dbPath.resolve("${currentManifestIndex}.manifest").toFile()
+    Preconditions.checkArgument(manifestFile.exists(), "Manifest file does not exist: $manifestFile")
+    randomAccessFile = RandomAccessFile(manifestFile, "rw")
+    randomAccessFile.seek(0)
+    randomAccessFile.filePointer
+    while (randomAccessFile.filePointer < randomAccessFile.length()) {
+      val recordSize = randomAccessFile.readInt()
+      Preconditions.checkArgument(recordSize >= 0, "Record size must be non-negative: $recordSize")
+      val bytes = ByteArray(recordSize)
+      val readBytes = randomAccessFile.read(bytes)
       Preconditions.checkArgument(readBytes == recordSize, "Read size mismatch: expected $recordSize, got $readBytes")
-      dataBuffer.flip()
-      val record = ManifestRecord.parseFrom(dataBuffer)
-      dataBuffer.clear()
-
+      val record = ManifestRecord.parseFrom(bytes)
       applyManifestRecord(record)
     }
-    manifestChannel.close()
-    manifestChannel = FileChannel.open(manifestFile, StandardOpenOption.APPEND)
-  }
-
-  private fun ensureCapacity(buffer: ByteBuffer?, size: Int): ByteBuffer {
-    if (buffer != null && buffer.capacity() >= size) {
-      return buffer
-    }
-    return ByteBuffer.allocateDirect(size)
+    randomAccessFile.seek(randomAccessFile.length())
   }
 
   private fun applyManifestRecord(record: ManifestRecord) {
@@ -177,7 +157,7 @@ class Manifest: Closeable {
   }
 
   private fun compactIfNeeded() {
-    val manifestSize = manifestChannel.size()
+    val manifestSize = randomAccessFile.length()
     if (manifestSize <= MANIFEST_SIZE_LIMIT) {
       return
     }
@@ -188,53 +168,42 @@ class Manifest: Closeable {
       .setCurrentSsTable(currentSSTableIndex)
       .addAllSsTableIndex(currentSSTables)
       .build()
-    val buffer = ByteBuffer.allocateDirect(4 + compactManifest.serializedSize)
-    buffer.putInt(compactManifest.serializedSize)
-    buffer.put(compactManifest.toByteArray())
-    buffer.flip()
+    val serializedSize = compactManifest.serializedSize
+    val bytes = compactManifest.toByteArray()
 
-    val newManifestChannel: FileChannel
+    val newRandomAccessFile: RandomAccessFile
     try {
-      val newManifestFile = dbPath.resolve("MANIFEST-$newManifestIndex")
-      newManifestChannel = FileChannel.open(
-        newManifestFile,
-        StandardOpenOption.APPEND,
-        StandardOpenOption.CREATE,
-        StandardOpenOption.TRUNCATE_EXISTING
-      )
-      while (buffer.hasRemaining()) {
-        newManifestChannel.write(buffer)
-      }
-      newManifestChannel.force(true)
+      val newManifestFile = dbPath.resolve("${newManifestIndex}.manifest")
+      Files.deleteIfExists(newManifestFile)
+      newRandomAccessFile = RandomAccessFile(newManifestFile.toFile(), "rw")
+      newRandomAccessFile.setLength(0)
+      newRandomAccessFile.seek(0)
+      newRandomAccessFile.writeInt(serializedSize)
+      newRandomAccessFile.write(bytes)
+      newRandomAccessFile.fd.sync()
     } catch (e: Exception) {
       LOG.error("[compactIfNeeded] Failed to create new manifest file", e)
       throw e
     }
 
     try {
-      val currentFileChannel = FileChannel.open(
-        dbPath.resolve("CURRENT"),
-        StandardOpenOption.APPEND,
-        StandardOpenOption.TRUNCATE_EXISTING
-      )
-      currentFileChannel.truncate(0)
-      val buffer = StandardCharsets.US_ASCII.encode("MANIFEST-$newManifestIndex")
-      while (buffer.hasRemaining()) {
-        currentFileChannel.write(buffer)
-      }
-      currentFileChannel.force(true)
-      currentFileChannel.close()
+      val currentRandomAccessFile = RandomAccessFile(dbPath.resolve("CURRENT").toFile(), "w")
+      currentRandomAccessFile.setLength(0)
+      currentRandomAccessFile.seek(0)
+      currentRandomAccessFile.write(StandardCharsets.US_ASCII.encode("${newManifestIndex}.manifest").array())
+      currentRandomAccessFile.fd.sync()
+      currentRandomAccessFile.close()
     } catch (e: Exception) {
       LOG.error("[compactIfNeeded] Failed to update CURRENT file", e)
       return
     }
 
-    manifestChannel.force(true)
-    manifestChannel.close()
-    manifestChannel = newManifestChannel
+    randomAccessFile.fd.sync()
+    randomAccessFile.close()
+    randomAccessFile = newRandomAccessFile
     currentManifestIndex = newManifestIndex
     try {
-      Files.delete(dbPath.resolve("MANIFEST-${newManifestIndex - 1}"))
+      Files.delete(dbPath.resolve("${newManifestIndex - 1}.manifest"))
     } catch (e: Exception) {
       LOG.error("[compactIfNeeded] Failed to delete old manifest file", e)
     }
