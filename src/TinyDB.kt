@@ -21,6 +21,8 @@ import src.wal.LogWriter
 import java.io.Closeable
 import java.nio.file.Path
 import java.util.PriorityQueue
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
 import kotlin.io.path.deleteIfExists
 
 class TinyDB: Closeable {
@@ -32,9 +34,11 @@ class TinyDB: Closeable {
   private val openingSSTables: MutableMap<Long, SSTableReader>
   private val setOpeningSSTables: MutableSet<SSTableReader>
   private var sequenceNumber: Long
+  private val lock: ReentrantLock
 
   constructor(config: Config) {
     this.config = config
+    this.lock = ReentrantLock()
     val dbPath = config.dbPath
     dbLock = DBLock(dbPath)
     manifest = Manifest(dbPath)
@@ -67,53 +71,59 @@ class TinyDB: Closeable {
   }
 
   fun get(key: ByteArray): ByteArray? {
-    val memTableKey = MemTableKey.newBuilder()
-      .setKey(ByteString.copyFrom(key))
-      .build()
+    return lock.withLock {
+      val memTableKey = MemTableKey.newBuilder()
+        .setKey(ByteString.copyFrom(key))
+        .build()
 
-    var memTableValue = memTable.get(memTableKey)
-    if (memTableValue != null) {
-      return when (memTableValue.dataCase) {
-        MemTableValue.DataCase.VALUE -> memTableValue.value.toByteArray()
-        else -> null
+      var memTableValue = memTable.get(memTableKey)
+      if (memTableValue != null) {
+        return@withLock when (memTableValue.dataCase) {
+          MemTableValue.DataCase.VALUE -> memTableValue.value.toByteArray()
+          else -> null
+        }
       }
-    }
 
-    for (openingSSTable in setOpeningSSTables) {
-      val entry = openingSSTable.get(memTableKey) ?: continue
-      if (memTableValue == null || entry.value.sequence > memTableValue.sequence) {
-        memTableValue = entry.value
+      for (openingSSTable in setOpeningSSTables) {
+        val entry = openingSSTable.get(memTableKey) ?: continue
+        if (memTableValue == null || entry.value.sequence > memTableValue.sequence) {
+          memTableValue = entry.value
+        }
       }
-    }
 
-    return memTableValue?.let {
-      when (it.dataCase) {
-        MemTableValue.DataCase.VALUE -> it.value.toByteArray()
-        else -> null
+      return@withLock memTableValue?.let {
+        when (it.dataCase) {
+          MemTableValue.DataCase.VALUE -> it.value.toByteArray()
+          else -> null
+        }
       }
     }
   }
 
   fun put(key: ByteArray, value: ByteArray) {
-    val memTableKey = MemTableKey.newBuilder()
-      .setKey(ByteString.copyFrom(key))
-      .build()
-    val memTableValue = MemTableValue.newBuilder()
-      .setValue(ByteString.copyFrom(value))
-      .setSequence(manifest.committedWalIndex() + 1)
-      .build()
-    return internalPut(memTableKey, memTableValue)
+    return lock.withLock {
+      val memTableKey = MemTableKey.newBuilder()
+        .setKey(ByteString.copyFrom(key))
+        .build()
+      val memTableValue = MemTableValue.newBuilder()
+        .setValue(ByteString.copyFrom(value))
+        .setSequence(manifest.committedWalIndex() + 1)
+        .build()
+      return@withLock internalPut(memTableKey, memTableValue)
+    }
   }
 
   fun delete(key: ByteArray) {
-    val memTableKey = MemTableKey.newBuilder()
-      .setKey(ByteString.copyFrom(key))
-      .build()
-    val memTableValue = MemTableValue.newBuilder()
-      .setTombstone(true)
-      .setSequence(sequenceNumber + 1)
-      .build()
-    return internalPut(memTableKey, memTableValue)
+    return lock.withLock {
+      val memTableKey = MemTableKey.newBuilder()
+        .setKey(ByteString.copyFrom(key))
+        .build()
+      val memTableValue = MemTableValue.newBuilder()
+        .setTombstone(true)
+        .setSequence(sequenceNumber + 1)
+        .build()
+      return@withLock internalPut(memTableKey, memTableValue)
+    }
   }
 
   override fun close() {

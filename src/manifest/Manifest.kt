@@ -89,7 +89,7 @@ class Manifest: Closeable {
     val readBytes = currentRandomAccessFile.read(bytes)
     Preconditions.checkArgument(readBytes == bytes.size, "Failed to read CURRENT file")
     val currentManifestFile = StandardCharsets.US_ASCII.decode(ByteBuffer.wrap(bytes)).toString()
-    val regex = Regex.fromLiteral("\\d+\\.manifest")
+    val regex = Regex("\\d+\\.manifest")
     Preconditions.checkArgument(currentManifestFile.matches(regex), "Invalid CURRENT file format")
     currentManifestIndex = currentManifestFile.substring(0, currentManifestFile.indexOf(".")).toLong()
     recoverManifestFiles()
