@@ -5,7 +5,7 @@ import java.nio.ByteBuffer
 
 data class Footer(val metaIndexHandle: BlockHandle, val indexHandle: BlockHandle) {
   companion object {
-    private const val MAGIC_NUMBER = 0x57fdb4c8L
+    const val MAGIC_NUMBER = 0x57fdb4c8L
     private const val FOOTER_SIZE = 40
   }
 

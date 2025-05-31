@@ -91,6 +91,8 @@ class SSTableReader: Closeable, Iterable<MemTableEntry> {
       .setOffset(buffer.long)
       .setSize(buffer.long)
       .build()
+    val magicNumber = buffer.long
+    Preconditions.checkArgument(magicNumber == Footer.MAGIC_NUMBER, "Invalid SSTable footer magic number")
     return Footer(metaIndexHandle, indexHandle)
   }
 
