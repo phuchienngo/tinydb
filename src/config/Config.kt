@@ -7,5 +7,6 @@ data class Config(
   val memTableEntriesLimit: Long,
   val memTableSizeLimit: Long,
   val ssTableBlockSize: Int,
-  val ssTableRestartInterval: Int
+  val ssTableRestartInterval: Int,
+  val level0CompactionThreshold: Int,
 )

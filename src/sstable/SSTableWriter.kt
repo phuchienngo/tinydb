@@ -3,6 +3,7 @@ package src.sstable
 import com.google.protobuf.ByteString
 import src.proto.memtable.MemTableEntry
 import src.proto.memtable.MemTableKey
+import src.proto.memtable.MemTableKeyRange
 import src.proto.sstable.BlockHandle
 import src.proto.sstable.PropertiesBlock
 import java.io.Closeable
@@ -40,6 +41,10 @@ class SSTableWriter(
     maxKey = maxOf(maxKey, memTableEntry.key)
   }
 
+  fun dataSize(): Long {
+    return randomAccessFile.length()
+  }
+
   fun finish(): Footer {
     setupNewDataBlock() // finish the last data block
 
@@ -70,14 +75,17 @@ class SSTableWriter(
   }
 
   private fun writePropertiesBlock(indexSize: Int, dataSize: Long): BlockHandle {
+    val keyRange = MemTableKeyRange.newBuilder()
+      .setStartKey(minKey)
+      .setEndKey(maxKey)
+      .build()
     val propertiesBlock = PropertiesBlock.newBuilder()
       .setEntries(recordCount)
       .setDataSize(dataSize)
       .setSsTableIndex(ssTableIndex)
       .setLevel(level)
       .setIndexSize(indexSize.toLong())
-      .setMinKey(minKey)
-      .setMaxKey(maxKey)
+      .setKeyRange(keyRange)
       .build()
     return writeBlock(propertiesBlock.toByteArray())
   }

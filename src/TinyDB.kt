@@ -1,21 +1,27 @@
 package src
 
+import com.google.common.base.Preconditions
+import com.google.common.primitives.Longs
 import com.google.protobuf.ByteString
+import src.comparator.MemTableKeyComparator
 import src.config.Config
 import src.manifest.Manifest
 import src.memtable.MemTable
-import src.proto.manifest.AddFile
 import src.proto.manifest.BatchOperation
 import src.proto.manifest.ManifestRecord
+import src.proto.manifest.RemoveFile
 import src.proto.memtable.MemTableEntry
 import src.proto.memtable.MemTableKey
+import src.proto.memtable.MemTableKeyRange
 import src.proto.memtable.MemTableValue
 import src.sstable.SSTableReader
-import src.sstable.SSTableWriter
+import src.sstable.SSTableWriterHelper
 import src.wal.LogReader
 import src.wal.LogWriter
 import java.io.Closeable
 import java.nio.file.Path
+import java.util.PriorityQueue
+import kotlin.io.path.deleteIfExists
 
 class TinyDB: Closeable {
   private val config: Config
@@ -24,6 +30,7 @@ class TinyDB: Closeable {
   private var walLogger: LogWriter
   private val memTable: MemTable
   private val openingSSTables: MutableMap<Long, SSTableReader>
+  private val setOpeningSSTables: MutableSet<SSTableReader>
   private var sequenceNumber: Long
 
   constructor(config: Config) {
@@ -32,11 +39,12 @@ class TinyDB: Closeable {
     dbLock = DBLock(dbPath)
     manifest = Manifest(dbPath)
     memTable = MemTable()
-    val logReader = LogReader(dbPath, manifest)
-    sequenceNumber = logReader.recover(memTable)
-    logReader.close()
+    LogReader(dbPath, manifest).use { logReader ->
+      sequenceNumber = logReader.recover(memTable)
+    }
     walLogger = LogWriter(dbPath, manifest)
     openingSSTables = mutableMapOf()
+    setOpeningSSTables = mutableSetOf()
     openSSTables(dbPath)
   }
 
@@ -47,11 +55,14 @@ class TinyDB: Closeable {
       if (listSSTableIndexes.contains(openingIndex)) {
         continue // Already opened
       }
-      openingSSTables.remove(openingIndex)?.close() // Remove stale SSTable
+      val table = openingSSTables.remove(openingIndex) ?: continue
+      setOpeningSSTables.remove(table)
+      table.close()
     }
     for (fileIndex in listSSTableIndexes) {
       val ssTableReader = SSTableReader(dbPath, fileIndex)
       openingSSTables.put(fileIndex, ssTableReader)
+      setOpeningSSTables.add(ssTableReader)
     }
   }
 
@@ -68,7 +79,7 @@ class TinyDB: Closeable {
       }
     }
 
-    for (openingSSTable in openingSSTables.values) {
+    for (openingSSTable in setOpeningSSTables) {
       val entry = openingSSTable.get(memTableKey) ?: continue
       if (memTableValue == null || entry.value.sequence > memTableValue.sequence) {
         memTableValue = entry.value
@@ -108,7 +119,7 @@ class TinyDB: Closeable {
   override fun close() {
     manifest.close()
     walLogger.close()
-    for (ssTableReader in openingSSTables.values) {
+    for (ssTableReader in setOpeningSSTables) {
       ssTableReader.close()
     }
     dbLock.close()
@@ -122,49 +133,211 @@ class TinyDB: Closeable {
       return
     }
     writeMemTableToSSTable()
+    runCompaction()
   }
 
   private fun writeMemTableToSSTable() {
-    val oldWalIndex = manifest.committedWalIndex()
-    val nextSSTableIndex = manifest.committedSSTableIndex() + 1
-    val nextWalIndex = oldWalIndex + 1
-    val ssTableWriter = SSTableWriter(
+    val tableWriterHelper = SSTableWriterHelper(
       config.dbPath,
-      nextSSTableIndex,
-      0,
+      0L,
       config.ssTableBlockSize,
-      config.ssTableRestartInterval
+      config.ssTableRestartInterval,
+      manifest.committedSSTableIndex() + 1
     )
-    persistMemTableEntry(ssTableWriter)
-    ssTableWriter.close()
-    val batchOperation = BatchOperation.newBuilder()
-      .addRecords(ManifestRecord.newBuilder()
-        .setCurrentSsTable(nextSSTableIndex)
-        .build()
-      ).addRecords(ManifestRecord.newBuilder()
-        .setCurrentWal(nextWalIndex)
-        .build()
-      ).addRecords(ManifestRecord.newBuilder()
-        .setAddFile(AddFile.newBuilder()
-          .addSsTableIndex(nextSSTableIndex)
-          .build()
-        ).build()
-      ).build()
-    manifest.commitChanges(batchOperation)
+    for ((memTableKey, memTableValue) in memTable.getMemTableEntries()) {
+      tableWriterHelper.write(memTableKey, memTableValue)
+    }
+    val changes = tableWriterHelper.finish()
+    val nextWalIndex = manifest.committedWalIndex() + 1
+    val finalChanges = changes.toBuilder()
+      .addRecords(ManifestRecord.newBuilder().setCurrentWal(nextWalIndex))
+      .build()
+    manifest.commitChanges(finalChanges)
     walLogger.destroy()
     walLogger = LogWriter(config.dbPath, manifest)
     memTable.clear()
     openSSTables(config.dbPath)
   }
 
-  private fun persistMemTableEntry(ssTableWriter: SSTableWriter) {
-    for ((memTableKey, memTableValue) in memTable.getMemTableEntries()) {
-      val entry = MemTableEntry.newBuilder()
-        .setKey(memTableKey)
-        .setValue(memTableValue)
-        .build()
-      ssTableWriter.add(entry)
+  private fun runCompaction() {
+    runCompactionLevel0()
+    var level = 1L
+    while (runCompactionAtLevel(level)) {
+      level += 1L
     }
-    ssTableWriter.finish()
+  }
+
+  private fun runCompactionLevel0() {
+    val levelOFiles = mutableSetOf<SSTableReader>()
+    for (ssTableReader in setOpeningSSTables) {
+      if (ssTableReader.getLevel() == 0L) {
+        levelOFiles.add(ssTableReader)
+      }
+    }
+    if (levelOFiles.size < config.level0CompactionThreshold) {
+      return
+    }
+    val compactionInputs = selectLevel0CompactionTables(levelOFiles)
+    runCompaction(compactionInputs, 1L)
+  }
+
+  private fun runCompaction(compactionInputs: Set<SSTableReader>, targetLevel: Long) {
+    val compactionResult = performCompaction(compactionInputs, targetLevel)
+    manifest.commitChanges(compactionResult)
+    val removeFiles = RemoveFile.newBuilder()
+    for (file in compactionInputs) {
+      removeFiles.addSsTableIndex(file.getSSTableIndex())
+    }
+    val deleteFileLog = BatchOperation.newBuilder()
+      .addRecords(ManifestRecord.newBuilder().setRemoveFile(removeFiles).build())
+      .build()
+    manifest.commitChanges(deleteFileLog)
+    for (file in compactionInputs) {
+      val fileIndex = file.getSSTableIndex()
+      openingSSTables.remove(fileIndex)?.close()
+      Preconditions.checkArgument(
+        config.dbPath.resolve("$fileIndex.sstable").deleteIfExists(),
+        "Failed to delete SSTable file: $fileIndex.sstable"
+      )
+    }
+  }
+
+  private fun runCompactionAtLevel(level: Long): Boolean {
+    val filesAtLevel = setOpeningSSTables.filter { it.getLevel() == level }
+    if (filesAtLevel.isEmpty()) {
+      return false
+    }
+    val totalSize = filesAtLevel.sumOf { it.getDataSize() }
+    if (!shouldCompactAtLevel(level, totalSize)) {
+      return true
+    }
+    val levelNFile = filesAtLevel.minBy { it.getLevel() }
+    val nextLevelNFiles = mutableSetOf<SSTableReader>()
+    for (file in filesAtLevel) {
+      if (file.getLevel() == level + 1L) {
+        nextLevelNFiles.add(file)
+      }
+    }
+    val compactionInputs = selectLevelNCompactionFiles(levelNFile, nextLevelNFiles)
+    runCompaction(compactionInputs, level + 1L)
+    return true
+  }
+
+  private fun selectLevelNCompactionFiles(selectedFile: SSTableReader, nextLevelFiles: Set<SSTableReader>): Set<SSTableReader> {
+    val compactionInputs = mutableSetOf<SSTableReader>()
+    compactionInputs.add(selectedFile)
+    for (nextLevelFile in nextLevelFiles) {
+      if (isRangeOverlapping(selectedFile.getKeyRange(), nextLevelFile.getKeyRange())) {
+        compactionInputs.add(nextLevelFile)
+      }
+    }
+    return compactionInputs
+  }
+
+  private fun shouldCompactAtLevel(level: Long, totalSize: Long): Boolean {
+    val expectedLevelSize = when (level) {
+      0L -> 8 * 1024 * 1024 // never reach this case
+      1L -> 10 * 1024 * 1024 // 10MB (about 5 SSTables)
+      2L -> 100L * 1024 * 1024 // 100MB (about 5 SSTables)
+      3L -> 1000L * 1024 * 1024 // 1GB (about 5 SSTables)
+      4L -> 10000L * 1024 * 1024 // 10GB (about 5 SSTables)
+      else -> 100000L * 1024 * 1024 // 100GB+ (about 5 SSTables)
+    }
+    return totalSize > expectedLevelSize
+  }
+
+  private fun selectLevel0CompactionTables(level0Files: Set<SSTableReader>): Set<SSTableReader> {
+    val level0Ranges = calculateKeyRange(level0Files)
+    val level1Files = setOpeningSSTables.filter { it.getLevel() == 1L }
+    val overlappingFiles = level1Files.filter { file ->
+      return@filter isRangeOverlapping(file.getKeyRange(), level0Ranges)
+    }
+    return level0Files + overlappingFiles
+  }
+
+  private fun calculateKeyRange(readers: Set<SSTableReader>): MemTableKeyRange {
+    var smallest: MemTableKey? = null
+    var largest: MemTableKey? = null
+    for (reader in readers) {
+      val minKey = reader.getKeyRange().startKey
+      val maxKey = reader.getKeyRange().endKey
+      if (smallest == null || MemTableKeyComparator.INSTANCE.compare(minKey, smallest) < 0) {
+        smallest = minKey
+      }
+      if (largest == null || MemTableKeyComparator.INSTANCE.compare(maxKey, largest) > 0) {
+        largest = maxKey
+      }
+    }
+
+    return MemTableKeyRange.newBuilder()
+      .setStartKey(smallest!!)
+      .setEndKey(largest!!)
+      .build()
+  }
+
+  private fun isRangeOverlapping(range1: MemTableKeyRange, range2: MemTableKeyRange): Boolean {
+    return MemTableKeyComparator.INSTANCE.compare(range1.startKey, range2.endKey) <= 0 &&
+           MemTableKeyComparator.INSTANCE.compare(range1.endKey, range2.startKey) >= 0
+  }
+
+  private fun performCompaction(compactionInputs: Set<SSTableReader>, targetLevel: Long): BatchOperation {
+    val excludeReaders = setOpeningSSTables.filter { table ->
+      return@filter !compactionInputs.contains(table)
+    }
+    val priorityQueue = PriorityQueue(Comparator<Pair<MemTableEntry, Iterator<MemTableEntry>>> { p1, p2 ->
+      val keyComparison = MemTableKeyComparator.INSTANCE.compare(p1.first.key, p2.first.key)
+      if (keyComparison != 0) {
+        return@Comparator keyComparison
+      }
+      return@Comparator Longs.compare(p1.first.value.sequence, p2.first.value.sequence)
+    })
+    for (reader in compactionInputs) {
+      val iterator = reader.iterator()
+      if (iterator.hasNext()) {
+        priorityQueue.add(Pair(iterator.next(), iterator))
+      }
+    }
+
+    val tableWriterHelper = SSTableWriterHelper(
+      config.dbPath,
+      targetLevel,
+      config.ssTableBlockSize,
+      config.ssTableRestartInterval,
+      manifest.committedSSTableIndex() + 1
+    )
+
+    var lastKey: MemTableKey? = null
+    var lastValue: MemTableValue? = null
+    while (priorityQueue.isNotEmpty()) {
+      val (currentEntry, iterator) = priorityQueue.poll()
+      if (lastKey != currentEntry.key && lastValue != null && lastKey != null) {
+        writeTableIfNeeded(tableWriterHelper, lastKey, lastValue, excludeReaders)
+      }
+      lastKey = currentEntry.key
+      lastValue = currentEntry.value
+      if (iterator.hasNext()) {
+        priorityQueue.add(Pair(iterator.next(), iterator))
+      }
+    }
+    if (lastValue != null && lastKey != null) {
+      writeTableIfNeeded(tableWriterHelper, lastKey, lastValue, excludeReaders)
+    }
+
+    return tableWriterHelper.finish()
+  }
+
+  private fun writeTableIfNeeded(
+    tableWriterHelper: SSTableWriterHelper,
+    memTableKey: MemTableKey,
+    memTableValue: MemTableValue,
+    excludeReaders: List<SSTableReader>
+  ) {
+    for (reader in excludeReaders) {
+      val value = reader.get(memTableKey) ?: continue
+      if (value.value.sequence >= memTableValue.sequence) {
+        return
+      }
+    }
+    tableWriterHelper.write(memTableKey, memTableValue)
   }
 }

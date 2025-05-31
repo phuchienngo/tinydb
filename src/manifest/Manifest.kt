@@ -12,6 +12,8 @@ import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
+import kotlin.io.path.createFile
+import kotlin.io.path.exists
 import kotlin.math.max
 
 class Manifest: Closeable {
@@ -83,10 +85,10 @@ class Manifest: Closeable {
       LOG.debug("[initialize] CURRENT file is empty => ignoring")
       return
     }
-    val byteArray = ByteArray(currentRandomAccessFile.length().toInt())
-    val readBytes = currentRandomAccessFile.read(byteArray)
-    Preconditions.checkArgument(readBytes == byteArray.size, "Failed to read CURRENT file")
-    val currentManifestFile = StandardCharsets.US_ASCII.decode(ByteBuffer.wrap(byteArray)).toString()
+    val bytes = ByteArray(currentRandomAccessFile.length().toInt())
+    val readBytes = currentRandomAccessFile.read(bytes)
+    Preconditions.checkArgument(readBytes == bytes.size, "Failed to read CURRENT file")
+    val currentManifestFile = StandardCharsets.US_ASCII.decode(ByteBuffer.wrap(bytes)).toString()
     val regex = Regex.fromLiteral("\\d+\\.manifest")
     Preconditions.checkArgument(currentManifestFile.matches(regex), "Invalid CURRENT file format")
     currentManifestIndex = currentManifestFile.substring(0, currentManifestFile.indexOf(".")).toLong()
@@ -98,7 +100,6 @@ class Manifest: Closeable {
     Preconditions.checkArgument(manifestFile.exists(), "Manifest file does not exist: $manifestFile")
     randomAccessFile = RandomAccessFile(manifestFile, "rw")
     randomAccessFile.seek(0)
-    randomAccessFile.filePointer
     while (randomAccessFile.filePointer < randomAccessFile.length()) {
       val recordSize = randomAccessFile.readInt()
       Preconditions.checkArgument(recordSize >= 0, "Record size must be non-negative: $recordSize")
@@ -174,7 +175,9 @@ class Manifest: Closeable {
     val newRandomAccessFile: RandomAccessFile
     try {
       val newManifestFile = dbPath.resolve("${newManifestIndex}.manifest")
-      Files.deleteIfExists(newManifestFile)
+      if (!newManifestFile.exists()) {
+        newManifestFile.createFile()
+      }
       newRandomAccessFile = RandomAccessFile(newManifestFile.toFile(), "rw")
       newRandomAccessFile.setLength(0)
       newRandomAccessFile.seek(0)
@@ -187,7 +190,11 @@ class Manifest: Closeable {
     }
 
     try {
-      val currentRandomAccessFile = RandomAccessFile(dbPath.resolve("CURRENT").toFile(), "w")
+      val currentFile = dbPath.resolve("CURRENT").toFile()
+      if (!currentFile.exists()) {
+        currentFile.createNewFile()
+      }
+      val currentRandomAccessFile = RandomAccessFile(currentFile, "w")
       currentRandomAccessFile.setLength(0)
       currentRandomAccessFile.seek(0)
       currentRandomAccessFile.write(StandardCharsets.US_ASCII.encode("${newManifestIndex}.manifest").array())

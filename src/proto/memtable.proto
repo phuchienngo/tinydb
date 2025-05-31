@@ -21,3 +21,8 @@ message MemTableEntry {
   MemTableKey key = 1;
   MemTableValue value = 2;
 }
+
+message MemTableKeyRange {
+  MemTableKey start_key = 1;
+  MemTableKey end_key = 2;
+}

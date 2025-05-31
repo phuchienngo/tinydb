@@ -1,9 +1,9 @@
 package src.sstable
 
 import com.google.common.base.Preconditions
-import com.google.common.collect.Iterators
 import src.proto.memtable.MemTableEntry
 import src.proto.memtable.MemTableKey
+import src.proto.memtable.MemTableKeyRange
 import src.proto.sstable.BlockHandle
 import src.proto.sstable.PropertiesBlock
 import java.io.Closeable
@@ -18,8 +18,7 @@ class SSTableReader: Closeable, Iterable<MemTableEntry> {
   private val bloomFilterReader: BloomFilterReader
   private val randomAccessFile: RandomAccessFile
   private val blockCache: MutableMap<BlockHandle, DataBlockReader>
-  private val minKey: MemTableKey
-  private val maxKey: MemTableKey
+  private val keyRange: MemTableKeyRange
   private val dataSize: Long
   private val entries: Int
   private val ssTableIndex: Long
@@ -35,9 +34,8 @@ class SSTableReader: Closeable, Iterable<MemTableEntry> {
     bloomFilterReader = BloomFilterReader(readBlock(bloomFilterHandle))
     val propertiesHandle = metaIndexBlockReader.getStatsBlockHandle()
     val propertiesBlock = PropertiesBlock.parseFrom(readBlock(propertiesHandle))
-    blockCache = mutableMapOf<BlockHandle, DataBlockReader>()
-    minKey = propertiesBlock.minKey
-    maxKey = propertiesBlock.maxKey
+    blockCache = initBlockCache()
+    keyRange = propertiesBlock.keyRange
     dataSize = propertiesBlock.dataSize
     entries = propertiesBlock.entries
     this.ssTableIndex = propertiesBlock.ssTableIndex
@@ -58,6 +56,18 @@ class SSTableReader: Closeable, Iterable<MemTableEntry> {
 
   fun getLevel(): Long {
     return level
+  }
+
+  fun getSSTableIndex(): Long {
+    return ssTableIndex
+  }
+
+  fun getKeyRange(): MemTableKeyRange {
+    return keyRange
+  }
+
+  fun getDataSize(): Long {
+    return dataSize
   }
 
   private fun getOrLoadBlockHandle(blockHandle: BlockHandle): DataBlockReader {
@@ -98,10 +108,36 @@ class SSTableReader: Closeable, Iterable<MemTableEntry> {
   }
 
   override fun iterator(): Iterator<MemTableEntry> {
-    val iterators = indexBlockReader.getBlockHandles()
-      .map(::getOrLoadBlockHandle)
-      .map(DataBlockReader::iterator)
-    // TODO: Lazy loading of iterators
-    return Iterators.concat(*iterators.toTypedArray())
+    val blockHandles = indexBlockReader.getBlockHandles()
+    val iterator = object: Iterator<MemTableEntry> {
+      private var blockIndex = 0
+      private var current: Iterator<MemTableEntry>? = null
+
+      private fun loadNextBlock() {
+        while (current?.hasNext() != true && blockIndex < blockHandles.size) {
+          current = getOrLoadBlockHandle(blockHandles[blockIndex++]).iterator()
+        }
+      }
+
+      override fun hasNext(): Boolean {
+        loadNextBlock()
+        return current != null && current!!.hasNext()
+      }
+
+      override fun next(): MemTableEntry {
+        loadNextBlock()
+        return current!!.next()
+      }
+    }
+    return iterator
+  }
+
+  private fun initBlockCache(): MutableMap<BlockHandle, DataBlockReader> {
+    return object: LinkedHashMap<BlockHandle, DataBlockReader>(128, 0.75f, true) {
+      private val maxEntries = 128 // Set your cache size limit here
+      override fun removeEldestEntry(eldest: Map.Entry<BlockHandle, DataBlockReader>): Boolean {
+        return size > maxEntries
+      }
+    }
   }
 }

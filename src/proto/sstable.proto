@@ -16,10 +16,9 @@ message PropertiesBlock {
   int32 entries = 1;
   int64 data_size = 2;
   int64 index_size = 3;
-  memtable.MemTableKey min_key = 4;
-  memtable.MemTableKey max_key = 5;
-  int64 ss_table_index = 6;
-  int64 level = 7;
+  memtable.MemTableKeyRange key_range = 4;
+  int64 ss_table_index = 5;
+  int64 level = 6;
 }
 
 message MetaIndexData {
