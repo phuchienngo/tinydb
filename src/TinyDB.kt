@@ -237,6 +237,9 @@ class TinyDB: Closeable {
     val levelNFiles = mutableSetOf<SSTableReader>()
     for (file in sortedFiles) {
       levelNFiles.add(file)
+      if (file.getLevel() != level) {
+        continue
+      }
       selectedSize += file.getDataSize()
       if (totalSize - selectedSize <= expectedSizeAtLevel) {
         break

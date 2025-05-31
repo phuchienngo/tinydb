@@ -3,27 +3,26 @@ package src.memtable
 import src.comparator.MemTableKeyComparator
 import src.proto.memtable.MemTableKey
 import src.proto.memtable.MemTableValue
-import java.util.concurrent.ConcurrentSkipListMap
-import java.util.concurrent.atomic.AtomicLong
+import java.util.TreeMap
 
 class MemTable {
-  private val skipList = ConcurrentSkipListMap<MemTableKey, MemTableValue>(MemTableKeyComparator.INSTANCE)
-  private val tableSize = AtomicLong(0)
+  private val treeMap = TreeMap<MemTableKey, MemTableValue>(MemTableKeyComparator.INSTANCE)
+  private var tableSize = 0L
 
   fun getMemTableEntries(): Set<Map.Entry<MemTableKey, MemTableValue>> {
-    return skipList.entries
+    return treeMap.entries
   }
 
   fun getMemTableSize(): Long {
-    return tableSize.get()
+    return tableSize
   }
 
   fun getEntriesCount(): Int {
-    return skipList.size
+    return treeMap.size
   }
 
   fun get(memTableKey: MemTableKey): MemTableValue? {
-    return skipList[memTableKey]
+    return treeMap[memTableKey]
   }
 
   fun put(memTableKey: MemTableKey, memTableValue: MemTableValue) {
@@ -31,18 +30,18 @@ class MemTable {
   }
 
   fun clear() {
-    skipList.clear()
-    tableSize.set(0)
+    treeMap.clear()
+    tableSize = 0L
   }
 
   private fun internalPut(memTableKey: MemTableKey, memTableValue: MemTableValue) {
-    if (skipList.containsKey(memTableKey)) {
-      val oldValue = skipList[memTableKey]!!
-      tableSize.addAndGet(-memTableKey.key.size().toLong())
-      tableSize.addAndGet(-oldValue.value.size().toLong())
+    if (treeMap.containsKey(memTableKey)) {
+      val oldValue = treeMap[memTableKey]!!
+      tableSize += -memTableKey.key.size().toLong()
+      tableSize += -oldValue.value.size().toLong()
     }
-    skipList[memTableKey] = memTableValue
-    tableSize.addAndGet(memTableKey.key.size().toLong())
-    tableSize.addAndGet(memTableValue.value.size().toLong())
+    treeMap[memTableKey] = memTableValue
+    tableSize += memTableKey.key.size().toLong()
+    tableSize += memTableValue.value.size().toLong()
   }
 }

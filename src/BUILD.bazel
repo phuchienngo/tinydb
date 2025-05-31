@@ -4,7 +4,6 @@ kt_jvm_binary(
     name = "main_app",
     srcs = [
         "DBLock.kt",
-        "MainApp.kt",
         "TinyDB.kt",
         "comparator/MemTableKeyComparator.kt",
         "comparator/MemTableKeyRangeComparator.kt",
