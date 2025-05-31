@@ -105,7 +105,6 @@ class SSTableWriter(
   private fun writeBlock(data: ByteArray): BlockHandle {
     val offset = currentOffset
     randomAccessFile.write(data)
-    randomAccessFile.fd.sync()
     currentOffset += data.size
     return BlockHandle.newBuilder()
       .setSize(offset)

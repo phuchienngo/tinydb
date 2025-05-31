@@ -20,7 +20,6 @@ class DataBlockWriter(
     }
     randomAccessFile.write(serializedSize)
     randomAccessFile.write(memTableEntry.toByteArray())
-    randomAccessFile.fd.sync()
     currentSize += serializedSize
     lastKey = memTableEntry.key
   }
