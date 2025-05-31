@@ -208,34 +208,50 @@ class TinyDB: Closeable {
       return false
     }
     val totalSize = filesAtLevel.sumOf { it.getDataSize() }
-    if (!shouldCompactAtLevel(level, totalSize)) {
+    val expectedSizeAtLevel = getDataSizeThresholdAtLevel(level)
+    if (totalSize < expectedSizeAtLevel) {
       return true
     }
-    val levelNFile = filesAtLevel.minBy { it.getLevel() }
-    val nextLevelNFiles = mutableSetOf<SSTableReader>()
-    for (file in filesAtLevel) {
-      if (file.getLevel() == level + 1L) {
-        nextLevelNFiles.add(file)
+
+    val nextLevelFiles = setOpeningSSTables.filter { it.getLevel() == level + 1L }.toSet()
+    val fileScoresAtLevel = filesAtLevel.associateWith { file ->
+      return@associateWith nextLevelFiles.count { nextFile ->
+        return@count isRangeOverlapping(file.getKeyRange(), nextFile.getKeyRange())
       }
     }
-    val compactionInputs = selectLevelNCompactionFiles(levelNFile, nextLevelNFiles)
+    val sortedFiles = filesAtLevel
+      .sortedWith(compareBy<SSTableReader> { fileScoresAtLevel[it]!! }
+      .thenBy { it.getSSTableIndex() })
+
+    var selectedSize = 0L
+    val levelNFiles = mutableSetOf<SSTableReader>()
+    for (file in sortedFiles) {
+      levelNFiles.add(file)
+      selectedSize += file.getDataSize()
+      if (totalSize - selectedSize <= expectedSizeAtLevel) {
+        break
+      }
+    }
+
+    val compactionInputs = selectLevelNCompactionFiles(levelNFiles, nextLevelFiles)
     runCompaction(compactionInputs, level + 1L)
     return true
   }
 
-  private fun selectLevelNCompactionFiles(selectedFile: SSTableReader, nextLevelFiles: Set<SSTableReader>): Set<SSTableReader> {
+  private fun selectLevelNCompactionFiles(selectedFiles: Set<SSTableReader>, nextLevelFiles: Set<SSTableReader>): Set<SSTableReader> {
     val compactionInputs = mutableSetOf<SSTableReader>()
-    compactionInputs.add(selectedFile)
+    val keyRanges = calculateKeyRange(selectedFiles)
+    compactionInputs.addAll(selectedFiles)
     for (nextLevelFile in nextLevelFiles) {
-      if (isRangeOverlapping(selectedFile.getKeyRange(), nextLevelFile.getKeyRange())) {
+      if (isRangeOverlapping(keyRanges, nextLevelFile.getKeyRange())) {
         compactionInputs.add(nextLevelFile)
       }
     }
     return compactionInputs
   }
 
-  private fun shouldCompactAtLevel(level: Long, totalSize: Long): Boolean {
-    val expectedLevelSize = when (level) {
+  private fun getDataSizeThresholdAtLevel(level: Long): Long {
+    return when (level) {
       0L -> 8 * 1024 * 1024 // never reach this case
       1L -> 10 * 1024 * 1024 // 10MB (about 5 SSTables)
       2L -> 100L * 1024 * 1024 // 100MB (about 5 SSTables)
@@ -243,7 +259,6 @@ class TinyDB: Closeable {
       4L -> 10000L * 1024 * 1024 // 10GB (about 5 SSTables)
       else -> 100000L * 1024 * 1024 // 100GB+ (about 5 SSTables)
     }
-    return totalSize > expectedLevelSize
   }
 
   private fun selectLevel0CompactionTables(level0Files: Set<SSTableReader>): Set<SSTableReader> {
