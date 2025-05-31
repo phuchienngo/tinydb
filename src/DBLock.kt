@@ -1,46 +1,44 @@
 package src
 
 import java.io.Closeable
-import java.nio.channels.FileChannel
+import java.io.RandomAccessFile
 import java.nio.channels.FileLock
+import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.StandardOpenOption
+import kotlin.io.path.exists
 
-class DBLock: Closeable {
-  private val channel: FileChannel
-  private val lock: FileLock?
+class DBLock(dbPath: Path) : Closeable {
+  private val randomAccessFile: RandomAccessFile
+  private val lock: FileLock
 
-  constructor(dbPath: Path) {
+  init {
     val lockPath = dbPath.resolve("LOCK")
-    this.channel = FileChannel.open(
-      lockPath,
-      StandardOpenOption.CREATE,
-      StandardOpenOption.WRITE,
-      StandardOpenOption.READ
-    )
-    try {
-      this.lock = channel.tryLock()
-    } catch (e: Exception) {
-      closeQuietly(channel)
-      throw e
+    if (!lockPath.exists()) {
+      Files.createFile(lockPath)
     }
-
-    if (lock == null) {
-      throw IllegalStateException("Unable to acquire lock on $dbPath")
+    randomAccessFile = RandomAccessFile(lockPath.toFile(), "rw")
+    try {
+      lock = randomAccessFile.channel.tryLock()
+        ?: throw IllegalStateException("Unable to acquire lock on $dbPath")
+    } catch (e: Exception) {
+      closeQuietly()
+      throw e
     }
   }
 
   override fun close() {
     try {
-      lock?.release()
+      lock.release()
+    } catch (_: Exception) {
+      // ignored
     } finally {
-      closeQuietly(channel)
+      closeQuietly()
     }
   }
 
-  private fun closeQuietly(channel: FileChannel) {
+  private fun closeQuietly() {
     try {
-      channel.close()
+      randomAccessFile.channel.close()
     } catch (_: Exception) {
       // ignored
     }
