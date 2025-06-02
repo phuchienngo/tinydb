@@ -53,7 +53,7 @@ class SSTableWriterHelper(
     }
     val estimatedSize = (currentDataSize * 1.2).toLong()
     val recordSize = nextEntrySize + 4
-    return estimatedSize + recordSize > targetSize
+    return currentDataSize > 0 && estimatedSize + recordSize > targetSize
   }
 
   private fun finishCurrentTable() {

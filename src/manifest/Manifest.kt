@@ -36,11 +36,11 @@ class Manifest: Closeable {
     initialize()
   }
 
-  fun committedWalIndex(): Long {
+  fun getCurrentWalIndex(): Long {
     return currentWalIndex
   }
 
-  fun committedSSTableIndex(): Long {
+  fun getCurrentSSTableIndex(): Long {
     return currentSSTableIndex
   }
 
@@ -103,8 +103,10 @@ class Manifest: Closeable {
       val bytes = ByteArray(recordSize)
       val readBytes = randomAccessFile.read(bytes)
       Preconditions.checkArgument(readBytes == recordSize, "Read size mismatch: expected $recordSize, got $readBytes")
-      val record = ManifestRecord.parseFrom(bytes)
-      applyManifestRecord(record)
+      val batchOperation = BatchOperation.parseFrom(bytes)
+      for (change in batchOperation.recordsList) {
+        applyManifestRecord(change)
+      }
     }
     randomAccessFile.seek(randomAccessFile.length())
   }

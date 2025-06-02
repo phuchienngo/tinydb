@@ -28,7 +28,7 @@ class LogWriter: Closeable {
 
   constructor(dbPath: Path, manifest: Manifest) {
     this.manifest = manifest
-    val walSequenceNumber = manifest.committedWalIndex()
+    val walSequenceNumber = manifest.getCurrentWalIndex()
     this.filePath = dbPath.resolve("${walSequenceNumber}.wal")
     this.randomAccessFile = RandomAccessFile(filePath.toFile(), "rws")
   }

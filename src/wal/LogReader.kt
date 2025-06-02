@@ -24,7 +24,7 @@ class LogReader: Closeable {
   private val hashing = Hashing.crc32c()
   private val randomAccessFile: RandomAccessFile
   constructor(dbPath: Path, manifest: Manifest) {
-    val walSequenceNumber = manifest.committedWalIndex()
+    val walSequenceNumber = manifest.getCurrentWalIndex()
     val filePath = dbPath.resolve("${walSequenceNumber}.wal")
     if (!filePath.exists()) {
       Files.createFile(filePath)

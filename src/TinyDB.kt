@@ -108,7 +108,7 @@ class TinyDB: Closeable {
         .build()
       val memTableValue = MemTableValue.newBuilder()
         .setValue(ByteString.copyFrom(value))
-        .setSequence(manifest.committedWalIndex() + 1)
+        .setSequence(manifest.getCurrentWalIndex() + 1)
         .build()
       return@withLock internalPut(memTableKey, memTableValue)
     }
@@ -158,13 +158,13 @@ class TinyDB: Closeable {
       0L,
       config.ssTableBlockSize,
       config.ssTableRestartInterval,
-      manifest.committedSSTableIndex() + 1
+      manifest.getCurrentSSTableIndex()
     )
     for ((memTableKey, memTableValue) in memTable.getMemTableEntries()) {
       tableWriterHelper.write(memTableKey, memTableValue)
     }
     val changes = tableWriterHelper.finish()
-    val nextWalIndex = manifest.committedWalIndex() + 1
+    val nextWalIndex = manifest.getCurrentWalIndex() + 1
     val finalChanges = changes.toBuilder()
       .addRecords(ManifestRecord.newBuilder().setCurrentWal(nextWalIndex))
       .build()
@@ -337,7 +337,7 @@ class TinyDB: Closeable {
       targetLevel,
       config.ssTableBlockSize,
       config.ssTableRestartInterval,
-      manifest.committedSSTableIndex() + 1
+      manifest.getCurrentSSTableIndex()
     )
 
     var lastKey: MemTableKey? = null
