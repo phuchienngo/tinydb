@@ -1,9 +1,13 @@
+@file:Suppress("FunctionName")
+
 package test
 
 import com.google.common.truth.Truth
 import org.junit.After
 import org.junit.Before
+import org.junit.FixMethodOrder
 import org.junit.Test
+import org.junit.runners.MethodSorters
 import src.TinyDB
 import src.config.Config
 import java.io.File
@@ -11,7 +15,7 @@ import java.nio.file.Files
 import java.util.concurrent.CountDownLatch
 import kotlin.random.Random
 
-@Suppress("FunctionName")
+@FixMethodOrder(MethodSorters.JVM)
 class SimpleOperationTest {
   private lateinit var db: TinyDB
   private lateinit var testDir: File

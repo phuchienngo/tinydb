@@ -23,3 +23,6 @@ jobs:
 
       - name: Test compaction
         run: bazel test //test:compaction_trigger_test
+
+      - name: Test startup
+        run: bazel test //test:wal_recovery_test
