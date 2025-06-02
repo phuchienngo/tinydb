@@ -30,7 +30,7 @@ class LogWriter: Closeable {
     this.manifest = manifest
     val walSequenceNumber = manifest.committedWalIndex()
     this.filePath = dbPath.resolve("${walSequenceNumber}.wal")
-    this.randomAccessFile = RandomAccessFile(filePath.toFile(), "w")
+    this.randomAccessFile = RandomAccessFile(filePath.toFile(), "rws")
   }
 
   fun put(memTableKey: MemTableKey, memTableValue: MemTableValue) {

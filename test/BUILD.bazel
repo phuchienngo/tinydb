@@ -1,0 +1,14 @@
+load("@rules_kotlin//kotlin:jvm.bzl", "kt_jvm_test")
+
+kt_jvm_test(
+    name = "simple_operation_test",
+    size = "medium",
+    srcs = ["SimpleOperationTest.kt"],
+    test_class = "test.SimpleOperationTest",
+    deps = [
+        "//src:main_app",
+        "@test//:com_google_truth_truth",
+        "@test//:junit_junit",
+        "@test//:org_jetbrains_kotlin_kotlin_test",
+    ],
+)

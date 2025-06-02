@@ -16,7 +16,7 @@ class DBLock(dbPath: Path) : Closeable {
     if (!lockPath.exists()) {
       Files.createFile(lockPath)
     }
-    randomAccessFile = RandomAccessFile(lockPath.toFile(), "rw")
+    randomAccessFile = RandomAccessFile(lockPath.toFile(), "rws")
     try {
       lock = randomAccessFile.channel.tryLock()
         ?: throw IllegalStateException("Unable to acquire lock on $dbPath")

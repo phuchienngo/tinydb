@@ -27,7 +27,23 @@ maven.install(
         "org.slf4j:slf4j-simple:2.0.17",
     ],
     repositories = [
+        "https://maven.google.com",
         "https://repo1.maven.org/maven2",
     ],
 )
 use_repo(maven, "main")
+
+test_maven = use_extension("@rules_jvm_external//:extensions.bzl", "maven")
+test_maven.install(
+    name = "test",
+    artifacts = [
+        "com.google.truth:truth:1.4.4",
+        "junit:junit:4.13.2",
+        "org.jetbrains.kotlin:kotlin-test:2.2.0-RC",
+    ],
+    repositories = [
+        "https://maven.google.com",
+        "https://repo1.maven.org/maven2",
+    ],
+)
+use_repo(test_maven, "test")

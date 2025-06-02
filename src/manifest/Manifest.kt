@@ -77,6 +77,7 @@ class Manifest: Closeable {
       LOG.debug("[initialize] Creating CURRENT file")
       Files.createFile(current)
       Files.createFile(dbPath.resolve("0.manifest"))
+      randomAccessFile = RandomAccessFile(current.toFile(), "rws")
       return
     }
 
@@ -98,7 +99,7 @@ class Manifest: Closeable {
   private fun recoverManifestFiles() {
     val manifestFile = dbPath.resolve("${currentManifestIndex}.manifest").toFile()
     Preconditions.checkArgument(manifestFile.exists(), "Manifest file does not exist: $manifestFile")
-    randomAccessFile = RandomAccessFile(manifestFile, "rw")
+    randomAccessFile = RandomAccessFile(manifestFile, "rws")
     randomAccessFile.seek(0)
     while (randomAccessFile.filePointer < randomAccessFile.length()) {
       val recordSize = randomAccessFile.readInt()
@@ -178,7 +179,7 @@ class Manifest: Closeable {
       if (!newManifestFile.exists()) {
         newManifestFile.createFile()
       }
-      newRandomAccessFile = RandomAccessFile(newManifestFile.toFile(), "rw")
+      newRandomAccessFile = RandomAccessFile(newManifestFile.toFile(), "rws")
       newRandomAccessFile.setLength(0)
       newRandomAccessFile.seek(0)
       newRandomAccessFile.writeInt(serializedSize)
@@ -194,7 +195,7 @@ class Manifest: Closeable {
       if (!currentFile.exists()) {
         currentFile.createNewFile()
       }
-      val currentRandomAccessFile = RandomAccessFile(currentFile, "w")
+      val currentRandomAccessFile = RandomAccessFile(currentFile, "rws")
       currentRandomAccessFile.setLength(0)
       currentRandomAccessFile.seek(0)
       currentRandomAccessFile.write(StandardCharsets.US_ASCII.encode("${newManifestIndex}.manifest").array())

@@ -18,7 +18,7 @@ class SSTableWriter(
   restartInterval: Int
 ): Closeable {
   private val filePath = dbPath.resolve("${ssTableIndex}.sstable")
-  private val randomAccessFile = RandomAccessFile(filePath.toFile(), "w")
+  private val randomAccessFile = RandomAccessFile(filePath.toFile(), "rws")
   private val dataBlockWriter = DataBlockWriter(restartInterval, randomAccessFile)
   private val indexBlockBuilder = IndexBlockBuilder()
   private val metaIndexBlockBuilder = MetaIndexBlockBuilder()

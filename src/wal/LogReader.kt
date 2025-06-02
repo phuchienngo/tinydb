@@ -10,7 +10,9 @@ import src.proto.memtable.MemTableEntry
 import java.io.Closeable
 import java.io.RandomAccessFile
 import java.nio.ByteBuffer
+import java.nio.file.Files
 import java.nio.file.Path
+import kotlin.io.path.exists
 import kotlin.math.max
 
 class LogReader: Closeable {
@@ -24,6 +26,9 @@ class LogReader: Closeable {
   constructor(dbPath: Path, manifest: Manifest) {
     val walSequenceNumber = manifest.committedWalIndex()
     val filePath = dbPath.resolve("${walSequenceNumber}.wal")
+    if (!filePath.exists()) {
+      Files.createFile(filePath)
+    }
     randomAccessFile = RandomAccessFile(filePath.toFile(), "r")
   }
 
