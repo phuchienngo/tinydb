@@ -89,7 +89,7 @@ class LogWriter: Closeable {
     val blockDataSize = writtenSize - HEADER_SIZE
     val bytes = ByteArray(writtenSize)
     val buffer = ByteBuffer.wrap(bytes)
-    val crc32 = calculateChecksum(data, offset, writtenSize)
+    val crc32 = calculateChecksum(data, offset, blockDataSize)
     buffer.putInt(crc32)
     buffer.put(blockType.value)
     buffer.putShort(blockDataSize.toShort())
