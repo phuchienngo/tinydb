@@ -14,21 +14,22 @@ class DataBlockWriter(
   private var lastKey = MemTableKey.getDefaultInstance()
 
   fun write(memTableEntry: MemTableEntry) {
-    val serializedSize = memTableEntry.serializedSize + 4
     if (restartCount++ % restartInterval == 0) {
       restartPoints.add(currentSize)
     }
-    randomAccessFile.write(serializedSize)
+    randomAccessFile.writeInt(memTableEntry.serializedSize)
     randomAccessFile.write(memTableEntry.toByteArray())
-    currentSize += serializedSize
+    currentSize += memTableEntry.serializedSize + 4
     lastKey = memTableEntry.key
   }
 
   fun finish() {
     for (point in restartPoints) {
-      randomAccessFile.write(point)
+      randomAccessFile.writeInt(point)
+      currentSize += 4
     }
-    randomAccessFile.write(restartPoints.size)
+    randomAccessFile.writeInt(restartPoints.size)
+    currentSize += 4
     randomAccessFile.fd.sync()
   }
 

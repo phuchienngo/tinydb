@@ -33,7 +33,7 @@ class DataBlockReader: Iterable<MemTableEntry> {
       val entry = getEntryAtOffset(restartPoints[mid])
       val cmp = ByteString.unsignedLexicographicalComparator().compare(entry.key.key, memTableKey.key)
       when {
-        cmp == 0 -> entry
+        cmp == 0 -> return entry
         cmp < 0 -> {
           result = mid
           left = mid + 1

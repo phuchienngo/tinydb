@@ -53,7 +53,7 @@ class Manifest: Closeable {
     val serializedSize = batchOperation.serializedSize
     val byteArray = batchOperation.toByteArray()
     try {
-      randomAccessFile.write(serializedSize)
+      randomAccessFile.writeInt(serializedSize)
       randomAccessFile.write(byteArray)
       randomAccessFile.fd.sync()
     } catch (e: Exception) {

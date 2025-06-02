@@ -31,7 +31,7 @@ class SSTableWriter(
   fun add(memTableEntry: MemTableEntry) {
     val recordSize = estimateRecordSize(memTableEntry)
     val estimatedNextSize = dataBlockWriter.writtenSize() + recordSize
-    if (estimatedNextSize > blockSize) {
+    if (estimatedNextSize > blockSize && dataBlockWriter.writtenSize() > 0) {
       setupNewDataBlock()
     }
     dataBlockWriter.write(memTableEntry)
@@ -92,12 +92,13 @@ class SSTableWriter(
 
   private fun setupNewDataBlock() {
     val lastKey = dataBlockWriter.lastKey()
+    dataBlockWriter.finish()
+    val writtenSize = dataBlockWriter.writtenSize().toLong()
     val blockHandle = BlockHandle.newBuilder()
-      .setOffset(randomAccessFile.filePointer)
-      .setSize(dataBlockWriter.writtenSize().toLong())
+      .setOffset(currentOffset)
+      .setSize(writtenSize)
       .build()
     indexBlockBuilder.add(lastKey, blockHandle)
-    dataBlockWriter.finish()
     dataBlockWriter.reset()
     currentOffset = randomAccessFile.filePointer
   }
@@ -107,7 +108,7 @@ class SSTableWriter(
     randomAccessFile.write(data)
     currentOffset += data.size
     return BlockHandle.newBuilder()
-      .setSize(offset)
+      .setOffset(offset)
       .setSize(data.size.toLong())
       .build()
   }
