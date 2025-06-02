@@ -1,5 +1,6 @@
 package src
 
+import com.google.common.annotations.VisibleForTesting
 import com.google.common.base.Preconditions
 import com.google.common.primitives.Longs
 import com.google.protobuf.ByteString
@@ -133,6 +134,11 @@ class TinyDB: Closeable {
       ssTableReader.close()
     }
     dbLock.close()
+  }
+
+  @VisibleForTesting
+  fun getLevelNFileCount(level: Long): Long {
+    return setOpeningSSTables.count { it.getLevel() == level }.toLong()
   }
 
   private fun internalPut(memTableKey: MemTableKey, memTableValue: MemTableValue) {

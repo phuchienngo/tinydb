@@ -12,3 +12,16 @@ kt_jvm_test(
         "@test//:org_jetbrains_kotlin_kotlin_test",
     ],
 )
+
+kt_jvm_test(
+    name = "compaction_trigger_test",
+    size = "large",
+    srcs = ["CompactionTriggerTest.kt"],
+    test_class = "test.CompactionTriggerTest",
+    deps = [
+        "//src:main_app",
+        "@test//:com_google_truth_truth",
+        "@test//:junit_junit",
+        "@test//:org_jetbrains_kotlin_kotlin_test",
+    ],
+)

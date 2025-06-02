@@ -33,7 +33,6 @@ kt_jvm_binary(
         "//src/proto:java_proto",
         "@main//:com_google_guava_guava",
         "@main//:com_google_protobuf_protobuf_java",
-        "@main//:org_apache_commons_commons_collections4",
         "@main//:org_slf4j_slf4j_api",
         "@main//:org_slf4j_slf4j_simple",
     ],

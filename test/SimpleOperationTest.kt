@@ -6,23 +6,21 @@ import org.junit.Before
 import org.junit.Test
 import src.TinyDB
 import src.config.Config
+import java.io.File
 import java.nio.file.Files
-import java.nio.file.Path
 import java.util.concurrent.CountDownLatch
-import kotlin.io.path.ExperimentalPathApi
-import kotlin.io.path.deleteRecursively
 import kotlin.random.Random
 
 @Suppress("FunctionName")
 class SimpleOperationTest {
   private lateinit var db: TinyDB
-  private lateinit var testDir: Path
+  private lateinit var testDir: File
 
   @Before
   fun setUp() {
-    testDir = Files.createTempDirectory("test_db_").toAbsolutePath()
+    testDir = Files.createTempDirectory("test_db_").toAbsolutePath().toFile()
     val config = Config(
-      dbPath = testDir,
+      dbPath = testDir.toPath(),
       memTableEntriesLimit = 10,
       memTableSizeLimit = 1024 * 1024L,
       ssTableBlockSize = 4096,
@@ -32,7 +30,6 @@ class SimpleOperationTest {
     db = TinyDB(config)
   }
 
-  @OptIn(ExperimentalPathApi::class)
   @After
   fun tearDown() {
     db.close()
