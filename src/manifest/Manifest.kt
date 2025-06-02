@@ -1,6 +1,7 @@
 package src.manifest
 
 import com.google.common.base.Preconditions
+import com.google.common.primitives.Longs
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import src.proto.manifest.BatchOperation
@@ -8,8 +9,6 @@ import src.proto.manifest.CompactManifest
 import src.proto.manifest.ManifestRecord
 import java.io.Closeable
 import java.io.RandomAccessFile
-import java.nio.ByteBuffer
-import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.io.path.createFile
@@ -72,27 +71,24 @@ class Manifest: Closeable {
   }
 
   private fun initialize() {
-    val current = dbPath.resolve("CURRENT")
-    if (!Files.exists(current)) {
+    val current = dbPath.resolve("CURRENT").toFile()
+    if (!current.exists()) {
       LOG.debug("[initialize] Creating CURRENT file")
-      Files.createFile(current)
-      Files.createFile(dbPath.resolve("0.manifest"))
-      randomAccessFile = RandomAccessFile(current.toFile(), "rws")
+      current.createNewFile()
+      current.writeBytes(Longs.toByteArray(0))
+      val manifestFile = dbPath.resolve("0.manifest")
+      Files.createFile(manifestFile)
+      randomAccessFile = RandomAccessFile(manifestFile.toFile(), "rws")
       return
     }
 
-    val currentRandomAccessFile = RandomAccessFile(current.toFile(), "r")
+    val currentRandomAccessFile = RandomAccessFile(current, "r")
     if (currentRandomAccessFile.length() == 0L) {
       LOG.debug("[initialize] CURRENT file is empty => ignoring")
       return
     }
-    val bytes = ByteArray(currentRandomAccessFile.length().toInt())
-    val readBytes = currentRandomAccessFile.read(bytes)
-    Preconditions.checkArgument(readBytes == bytes.size, "Failed to read CURRENT file")
-    val currentManifestFile = StandardCharsets.US_ASCII.decode(ByteBuffer.wrap(bytes)).toString()
-    val regex = Regex("\\d+\\.manifest")
-    Preconditions.checkArgument(currentManifestFile.matches(regex), "Invalid CURRENT file format")
-    currentManifestIndex = currentManifestFile.substring(0, currentManifestFile.indexOf(".")).toLong()
+    Preconditions.checkArgument(currentRandomAccessFile.length() == 8L, "CURRENT file must be exactly 8 bytes long")
+    currentManifestIndex = currentRandomAccessFile.readLong()
     recoverManifestFiles()
   }
 
@@ -198,7 +194,7 @@ class Manifest: Closeable {
       val currentRandomAccessFile = RandomAccessFile(currentFile, "rws")
       currentRandomAccessFile.setLength(0)
       currentRandomAccessFile.seek(0)
-      currentRandomAccessFile.write(StandardCharsets.US_ASCII.encode("${newManifestIndex}.manifest").array())
+      currentRandomAccessFile.writeLong(newManifestIndex)
       currentRandomAccessFile.fd.sync()
       currentRandomAccessFile.close()
     } catch (e: Exception) {
