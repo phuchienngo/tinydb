@@ -1,6 +1,7 @@
 package src.sstable
 
 import com.google.common.base.Preconditions
+import src.comparator.MemTableKeyComparator
 import src.proto.memtable.MemTableEntry
 import src.proto.memtable.MemTableKey
 import src.proto.memtable.MemTableKeyRange
@@ -43,7 +44,7 @@ class SSTableReader: Closeable, Iterable<MemTableEntry> {
   }
 
   fun get(memTableKey: MemTableKey): MemTableEntry? {
-    if (!bloomFilterReader.mightContain(memTableKey)) {
+    if (!inRange(memTableKey) || !bloomFilterReader.mightContain(memTableKey)) {
       return null
     }
     val blockHandle = indexBlockReader.findBlockHandle(memTableKey)
@@ -68,6 +69,11 @@ class SSTableReader: Closeable, Iterable<MemTableEntry> {
 
   fun getDataSize(): Long {
     return dataSize
+  }
+
+  private fun inRange(memTableKey: MemTableKey): Boolean {
+    return MemTableKeyComparator.INSTANCE.compare(keyRange.startKey, memTableKey) <= 0
+        && MemTableKeyComparator.INSTANCE.compare(memTableKey, keyRange.endKey) <= 0
   }
 
   private fun getOrLoadBlockHandle(blockHandle: BlockHandle): DataBlockReader {
