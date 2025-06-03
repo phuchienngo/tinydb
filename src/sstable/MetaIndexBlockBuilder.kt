@@ -7,11 +7,11 @@ class MetaIndexBlockBuilder {
   private val indexMap = MetaIndexData.newBuilder()
 
   fun addBloomFilterHandle(blockHandle: BlockHandle) {
-    indexMap.putMetaIndex("bloom_filter", blockHandle)
+    indexMap.setBloomFilter(blockHandle)
   }
 
   fun addStatsHandle(blockHandle: BlockHandle) {
-    indexMap.putMetaIndex("stats", blockHandle)
+    indexMap.setStats(blockHandle)
   }
 
   fun finish(): ByteArray {

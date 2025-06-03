@@ -11,10 +11,10 @@ class MetaIndexBlockReader {
   }
 
   fun getBloomFilterBlockHandle(): BlockHandle {
-    return indexMap.metaIndexMap["bloom_filter"]!!
+    return indexMap.bloomFilter
   }
 
   fun getStatsBlockHandle(): BlockHandle {
-    return indexMap.metaIndexMap["stats"]!!
+    return indexMap.stats
   }
 }

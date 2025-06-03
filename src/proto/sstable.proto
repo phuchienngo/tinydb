@@ -22,7 +22,8 @@ message PropertiesBlock {
 }
 
 message MetaIndexData {
-  map<string, BlockHandle> meta_index = 1;
+  BlockHandle bloom_filter = 1;
+  BlockHandle stats = 2;
 }
 
 message IndexData {
