@@ -32,3 +32,6 @@ jobs:
 
       - name: Test database lock
         run: bazel test //test:database_lock_test
+
+      - name: Test manifest
+        run: bazel test //test:manifest_activity_test
