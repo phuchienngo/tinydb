@@ -76,7 +76,7 @@ class Manifest: Closeable {
       LOG.debug("[initialize] Creating CURRENT file")
       current.createNewFile()
       current.writeBytes(Longs.toByteArray(0))
-      val manifestFile = dbPath.resolve("0.manifest")
+      val manifestFile = dbPath.resolve("0.mnf")
       Files.createFile(manifestFile)
       randomAccessFile = RandomAccessFile(manifestFile.toFile(), "rws")
       return
@@ -93,7 +93,7 @@ class Manifest: Closeable {
   }
 
   private fun recoverManifestFiles() {
-    val manifestFile = dbPath.resolve("${currentManifestIndex}.manifest").toFile()
+    val manifestFile = dbPath.resolve("${currentManifestIndex}.mnf").toFile()
     Preconditions.checkArgument(manifestFile.exists(), "Manifest file does not exist: $manifestFile")
     randomAccessFile = RandomAccessFile(manifestFile, "rws")
     randomAccessFile.seek(0)
@@ -173,7 +173,7 @@ class Manifest: Closeable {
 
     val newRandomAccessFile: RandomAccessFile
     try {
-      val newManifestFile = dbPath.resolve("${newManifestIndex}.manifest")
+      val newManifestFile = dbPath.resolve("${newManifestIndex}.mnf")
       if (!newManifestFile.exists()) {
         newManifestFile.createFile()
       }
@@ -209,7 +209,7 @@ class Manifest: Closeable {
     randomAccessFile = newRandomAccessFile
     currentManifestIndex = newManifestIndex
     try {
-      Files.delete(dbPath.resolve("${newManifestIndex - 1}.manifest"))
+      Files.delete(dbPath.resolve("${newManifestIndex - 1}.mnf"))
     } catch (e: Exception) {
       LOG.error("[compactIfNeeded] Failed to delete old manifest file", e)
     }

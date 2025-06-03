@@ -25,7 +25,7 @@ class SSTableReader: Closeable, Iterable<MemTableEntry> {
   private val level: Long
 
   constructor(dbPath: Path, ssTableIndex: Long) {
-    val filePath = dbPath.resolve("${ssTableIndex}.sstable").toFile()
+    val filePath = dbPath.resolve("${ssTableIndex}.sst").toFile()
     randomAccessFile = RandomAccessFile(filePath, "r")
     footer = readFooter()
     indexBlockReader = IndexBlockReader(readBlock(footer.indexHandle))

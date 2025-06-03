@@ -146,7 +146,7 @@ class TinyDB: Closeable {
     walLogger.put(memTableKey, memTableValue)
     memTable.put(memTableKey, memTableValue)
     sequenceNumber += 1
-    if (memTable.getEntriesCount() < config.memTableSizeLimit && memTable.getMemTableSize() < config.memTableSizeLimit) {
+    if (memTable.getEntriesCount() < config.memTableEntriesLimit && memTable.getMemTableSize() < config.memTableSizeLimit) {
       return
     }
     writeMemTableToSSTable()
@@ -201,6 +201,7 @@ class TinyDB: Closeable {
   private fun runCompaction(compactionInputs: Set<SSTableReader>, targetLevel: Long) {
     val compactionResult = performCompaction(compactionInputs, targetLevel)
     manifest.commitChanges(compactionResult)
+    openSSTables(config.dbPath)
     val removeFiles = RemoveFile.newBuilder()
     for (file in compactionInputs) {
       removeFiles.addSsTableIndex(file.getSSTableIndex())
@@ -213,10 +214,11 @@ class TinyDB: Closeable {
       val fileIndex = file.getSSTableIndex()
       openingSSTables.remove(fileIndex)?.close()
       Preconditions.checkArgument(
-        config.dbPath.resolve("$fileIndex.sstable").deleteIfExists(),
-        "Failed to delete SSTable file: $fileIndex.sstable"
+        config.dbPath.resolve("$fileIndex.sst").deleteIfExists(),
+        "Failed to delete SSTable file: $fileIndex.sst"
       )
     }
+    openSSTables(config.dbPath)
   }
 
   private fun runCompactionAtLevel(level: Long): Boolean {
