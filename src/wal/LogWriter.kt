@@ -26,11 +26,13 @@ class LogWriter: Closeable {
   private var currentBlockOffset = 0
   private val hashing = Hashing.crc32c()
 
-  constructor(dbPath: Path, manifest: Manifest) {
+  constructor(dbPath: Path, manifest: Manifest, currentBlockOffset: Int) {
     this.manifest = manifest
     val walSequenceNumber = manifest.getCurrentWalIndex()
     this.filePath = dbPath.resolve("${walSequenceNumber}.wal")
     this.randomAccessFile = RandomAccessFile(filePath.toFile(), "rws")
+    this.randomAccessFile.seek(this.randomAccessFile.length())
+    this.currentBlockOffset = currentBlockOffset
   }
 
   fun put(memTableKey: MemTableKey, memTableValue: MemTableValue) {
@@ -45,7 +47,7 @@ class LogWriter: Closeable {
     val serializedLog = memTableEntry.toByteArray()
     val serializedSize = serializedLog.size
     if (serializedSize + HEADER_SIZE <= BLOCK_SIZE - currentBlockOffset) {
-      currentBlockOffset += writeBlock(serializedLog, 0, BlockRecord.BlockType.FULL)
+      currentBlockOffset += HEADER_SIZE + writeBlock(serializedLog, 0, BlockRecord.BlockType.FULL)
       if (paddingBlock()) {
         currentBlockOffset = 0
       }
@@ -57,12 +59,12 @@ class LogWriter: Closeable {
     }
 
     if (serializedSize + HEADER_SIZE <= BLOCK_SIZE - currentBlockOffset) {
-      currentBlockOffset += writeBlock(serializedLog, 0, BlockRecord.BlockType.FULL)
+      currentBlockOffset += HEADER_SIZE + writeBlock(serializedLog, 0, BlockRecord.BlockType.FULL)
       return
     }
 
     var offset = writeBlock(serializedLog, 0, BlockRecord.BlockType.FIRST)
-    currentBlockOffset += offset
+    currentBlockOffset += offset + HEADER_SIZE
 
     while (serializedSize - offset + HEADER_SIZE > BLOCK_SIZE - currentBlockOffset) {
       if (paddingBlock()) {
@@ -70,13 +72,13 @@ class LogWriter: Closeable {
       }
       val written = writeBlock(serializedLog, offset, BlockRecord.BlockType.MIDDLE)
       offset += written
-      currentBlockOffset += written
+      currentBlockOffset += written + HEADER_SIZE
     }
 
     if (paddingBlock()) {
       currentBlockOffset = 0
     }
-    currentBlockOffset += writeBlock(serializedLog, offset, BlockRecord.BlockType.LAST)
+    currentBlockOffset += writeBlock(serializedLog, offset, BlockRecord.BlockType.LAST) + HEADER_SIZE
     if (paddingBlock()) {
       currentBlockOffset = 0
     }
@@ -84,8 +86,7 @@ class LogWriter: Closeable {
   }
 
   private fun writeBlock(data: ByteArray, offset: Int, blockType: BlockRecord.BlockType): Int {
-    val expectedSize = HEADER_SIZE + data.size - offset
-    val writtenSize = min(expectedSize, BLOCK_SIZE - currentBlockOffset)
+    val writtenSize = min(HEADER_SIZE + data.size - offset, BLOCK_SIZE - currentBlockOffset)
     val blockDataSize = writtenSize - HEADER_SIZE
     val bytes = ByteArray(writtenSize)
     val buffer = ByteBuffer.wrap(bytes)

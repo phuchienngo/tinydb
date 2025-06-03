@@ -44,10 +44,13 @@ class TinyDB: Closeable {
     dbLock = DBLock(dbPath)
     manifest = Manifest(dbPath)
     memTable = MemTable()
+    var currentBlockOffset = 0
     LogReader(dbPath, manifest).use { logReader ->
-      sequenceNumber = logReader.recover(memTable)
+      var tmp = logReader.recover(memTable)
+      sequenceNumber = tmp.first
+      currentBlockOffset = tmp.second
     }
-    walLogger = LogWriter(dbPath, manifest)
+    walLogger = LogWriter(dbPath, manifest, currentBlockOffset)
     openingSSTables = mutableMapOf()
     setOpeningSSTables = mutableSetOf()
     openSSTables(dbPath)
@@ -108,7 +111,7 @@ class TinyDB: Closeable {
         .build()
       val memTableValue = MemTableValue.newBuilder()
         .setValue(ByteString.copyFrom(value))
-        .setSequence(manifest.getCurrentWalIndex() + 1)
+        .setSequence(sequenceNumber + 1)
         .build()
       return@withLock internalPut(memTableKey, memTableValue)
     }
@@ -170,7 +173,7 @@ class TinyDB: Closeable {
       .build()
     manifest.commitChanges(finalChanges)
     walLogger.destroy()
-    walLogger = LogWriter(config.dbPath, manifest)
+    walLogger = LogWriter(config.dbPath, manifest, 0)
     memTable.clear()
     openSSTables(config.dbPath)
   }

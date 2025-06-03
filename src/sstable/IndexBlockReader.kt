@@ -23,6 +23,6 @@ class IndexBlockReader {
   }
 
   fun findBlockHandle(memTableKey: MemTableKey): BlockHandle? {
-    return blockList.floorEntry(memTableKey)?.value
+    return blockList.ceilingEntry(memTableKey)?.value
   }
 }

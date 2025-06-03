@@ -32,15 +32,19 @@ class LogReader: Closeable {
     randomAccessFile = RandomAccessFile(filePath.toFile(), "r")
   }
 
-  fun recover(memTable: MemTable): Long {
+  fun recover(memTable: MemTable): Pair<Long, Int> {
     randomAccessFile.seek(0)
     val block = ByteArray(BLOCK_SIZE)
     var logSequence = 0L
     var temp: ByteBuffer? = null
+    var currentBlockOffset = 0
     while (randomAccessFile.filePointer < randomAccessFile.length()) {
+      currentBlockOffset = 0
       val bytesRead = randomAccessFile.read(block)
-      Preconditions.checkArgument(bytesRead == BLOCK_SIZE, "Expected to read full block size, but got $bytesRead")
+//      Preconditions.checkArgument(bytesRead == BLOCK_SIZE, "Expected to read full block size, but got $bytesRead")
       val buffer = ByteBuffer.wrap(block)
+      buffer.limit(bytesRead)
+      buffer.position(0)
       parseBuffer@ while (buffer.hasRemaining()) {
         if (buffer.remaining() <= HEADER_SIZE) {
           // skip padding bytes
@@ -51,6 +55,7 @@ class LogReader: Closeable {
         val blockSize = buffer.short.toInt()
         val data = ByteArray(blockSize)
         buffer.get(data)
+        currentBlockOffset += HEADER_SIZE + blockSize
         val record = BlockRecord(crc32, blockType, ByteBuffer.wrap(data))
         if (!validateChecksum(record)) {
           LOG.error("Invalid checksum for block, skipping")
@@ -58,41 +63,43 @@ class LogReader: Closeable {
         }
         when (blockType) {
           BlockRecord.BlockType.FULL -> {
-            Preconditions.checkArgument(temp == null || temp.capacity() == 0, "Temp buffer should be empty for FULL block")
+            Preconditions.checkArgument(temp == null || temp.limit() == 0, "Temp buffer should be empty for FULL block")
             logSequence = max(logSequence, processWALRecord(MemTableEntry.parseFrom(record.data), memTable))
           }
           BlockRecord.BlockType.FIRST -> {
-            Preconditions.checkArgument(temp == null || temp.capacity() == 0, "Temp buffer should be empty for FIRST block")
-            temp?.clear()
-            temp = ensureCapacity(temp, (temp?.capacity() ?: 0) + record.data.capacity())
+            Preconditions.checkArgument(temp == null || temp.position() == 0, "Temp buffer should be empty for FIRST block")
+            temp?.position(0)
+            temp = ensureCapacity(temp, (temp?.position() ?: 0) + record.data.capacity())
             temp.put(record.data)
           }
           BlockRecord.BlockType.MIDDLE -> {
-            Preconditions.checkArgument(temp != null && temp.capacity() > 0, "Temp buffer should not be empty for MIDDLE block")
-            temp = ensureCapacity(temp, temp!!.capacity() + record.data.capacity())
+            Preconditions.checkArgument(temp != null && temp.position() > 0, "Temp buffer should not be empty for MIDDLE block")
+            temp = ensureCapacity(temp, temp!!.position() + record.data.capacity())
             temp.put(record.data)
           }
           BlockRecord.BlockType.LAST -> {
-            Preconditions.checkArgument(temp != null && temp.capacity() > 0, "Temp buffer should not be empty for LAST block")
-            temp = ensureCapacity(temp, temp!!.capacity() + record.data.capacity())
+            Preconditions.checkArgument(temp != null && temp.position() > 0, "Temp buffer should not be empty for LAST block")
+            temp = ensureCapacity(temp, temp!!.position() + record.data.capacity())
             temp.put(record.data)
             temp.flip()
             logSequence = max(logSequence, processWALRecord(MemTableEntry.parseFrom(temp), memTable))
-            temp.clear()
+            temp.clear().limit(0)
           }
         }
       }
     }
-    return logSequence
+    return Pair(logSequence, currentBlockOffset % BLOCK_SIZE)
   }
 
   private fun ensureCapacity(currentBuffer: ByteBuffer?, requestSize: Int): ByteBuffer {
     if (currentBuffer == null || currentBuffer.capacity() < requestSize) {
       val newBuffer = ByteBuffer.allocateDirect(requestSize)
+      newBuffer.limit(requestSize)
       currentBuffer?.flip() ?: return newBuffer
       newBuffer.put(currentBuffer)
       return newBuffer
     }
+    currentBuffer.limit(currentBuffer.capacity())
     return currentBuffer
   }
 
