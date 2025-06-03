@@ -168,8 +168,11 @@ class Manifest: Closeable {
       .setCurrentSsTable(currentSSTableIndex)
       .addAllSsTableIndex(currentSSTables)
       .build()
-    val serializedSize = compactManifest.serializedSize
-    val bytes = compactManifest.toByteArray()
+    val batchOperation = BatchOperation.newBuilder()
+      .addRecords(ManifestRecord.newBuilder().setCompactManifest(compactManifest))
+      .build()
+    val serializedSize = batchOperation.serializedSize
+    val bytes = batchOperation.toByteArray()
 
     val newRandomAccessFile: RandomAccessFile
     try {
