@@ -6,7 +6,7 @@ import java.nio.ByteBuffer
 data class Footer(val metaIndexHandle: BlockHandle, val indexHandle: BlockHandle) {
   companion object {
     const val MAGIC_NUMBER = 0x57fdb4c8L
-    private const val FOOTER_SIZE = 40
+    private const val FOOTER_SIZE = 5 * Long.SIZE_BYTES
   }
 
   fun serialize(): ByteArray {

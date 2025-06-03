@@ -52,7 +52,7 @@ class SSTableWriterHelper(
       else -> 200000L * 1024 * 1024
     }
     val estimatedSize = (currentDataSize * 1.2).toLong()
-    val recordSize = nextEntrySize + 4
+    val recordSize = nextEntrySize + Int.SIZE_BYTES
     return currentDataSize > 0 && estimatedSize + recordSize > targetSize
   }
 
@@ -63,7 +63,7 @@ class SSTableWriterHelper(
 
   private fun setupNewTable(tableIndex: Long): SSTableWriter {
     changeLogs.addRecords(ManifestRecord.newBuilder()
-      .setCurrentSsTable(tableIndex)
+      .setCurrentSsTable(tableIndex + 1)
     ).addRecords(ManifestRecord.newBuilder()
       .setAddFile(AddFile.newBuilder()
         .addSsTableIndex(tableIndex)

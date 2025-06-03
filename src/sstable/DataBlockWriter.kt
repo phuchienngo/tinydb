@@ -19,17 +19,17 @@ class DataBlockWriter(
     }
     randomAccessFile.writeInt(memTableEntry.serializedSize)
     randomAccessFile.write(memTableEntry.toByteArray())
-    currentSize += memTableEntry.serializedSize + 4
+    currentSize += memTableEntry.serializedSize + Int.SIZE_BYTES
     lastKey = memTableEntry.key
   }
 
   fun finish() {
     for (point in restartPoints) {
       randomAccessFile.writeInt(point)
-      currentSize += 4
+      currentSize += Int.SIZE_BYTES
     }
     randomAccessFile.writeInt(restartPoints.size)
-    currentSize += 4
+    currentSize += Int.SIZE_BYTES
     randomAccessFile.fd.sync()
   }
 

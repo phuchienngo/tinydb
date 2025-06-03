@@ -23,8 +23,8 @@ class SSTableWriter(
   private val indexBlockBuilder = IndexBlockBuilder()
   private val metaIndexBlockBuilder = MetaIndexBlockBuilder()
   private val bloomFilterBuilder = BloomFilterBuilder(100000, 0.01)
-  private var minKey = MemTableKey.getDefaultInstance()
-  private var maxKey = MemTableKey.getDefaultInstance()
+  private var minKey: MemTableKey? = null
+  private var maxKey: MemTableKey? = null
   private var recordCount = 0
   private var currentOffset = 0L
 
@@ -37,8 +37,16 @@ class SSTableWriter(
     dataBlockWriter.write(memTableEntry)
     bloomFilterBuilder.add(memTableEntry.key)
     recordCount += 1
-    minKey = minOf(minKey, memTableEntry.key)
-    maxKey = maxOf(maxKey, memTableEntry.key)
+    minKey = if (minKey == null) {
+      memTableEntry.key
+    } else {
+      minOf(minKey!!, memTableEntry.key)
+    }
+    maxKey = if (maxKey == null) {
+      memTableEntry.key
+    } else {
+      maxOf(maxKey!!, memTableEntry.key)
+    }
   }
 
   fun dataSize(): Long {
@@ -114,7 +122,7 @@ class SSTableWriter(
   }
 
   private fun estimateRecordSize(memTableEntry: MemTableEntry): Int {
-    return memTableEntry.serializedSize + 4
+    return memTableEntry.serializedSize + Int.SIZE_BYTES
   }
 
   private fun minOf(a: MemTableKey, b: MemTableKey): MemTableKey {

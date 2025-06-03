@@ -33,7 +33,6 @@ class TinyDB: Closeable {
   private var walLogger: LogWriter
   private val memTable: MemTable
   private val openingSSTables: MutableMap<Long, SSTableReader>
-  private val setOpeningSSTables: MutableSet<SSTableReader>
   private var sequenceNumber: Long
   private val lock: ReentrantLock
 
@@ -52,7 +51,6 @@ class TinyDB: Closeable {
     }
     walLogger = LogWriter(dbPath, manifest, currentBlockOffset)
     openingSSTables = mutableMapOf()
-    setOpeningSSTables = mutableSetOf()
     openSSTables(dbPath)
   }
 
@@ -63,14 +61,14 @@ class TinyDB: Closeable {
       if (listSSTableIndexes.contains(openingIndex)) {
         continue // Already opened
       }
-      val table = openingSSTables.remove(openingIndex) ?: continue
-      setOpeningSSTables.remove(table)
-      table.close()
+      openingSSTables.remove(openingIndex)?.close()
     }
     for (fileIndex in listSSTableIndexes) {
+      if (openingSSTables.containsKey(fileIndex)) {
+        continue // Already opened
+      }
       val ssTableReader = SSTableReader(dbPath, fileIndex)
       openingSSTables.put(fileIndex, ssTableReader)
-      setOpeningSSTables.add(ssTableReader)
     }
   }
 
@@ -88,7 +86,7 @@ class TinyDB: Closeable {
         }
       }
 
-      for (openingSSTable in setOpeningSSTables) {
+      for ((_, openingSSTable) in openingSSTables) {
         val entry = openingSSTable.get(memTableKey) ?: continue
         if (memTableValue == null || entry.value.sequence > memTableValue.sequence) {
           memTableValue = entry.value
@@ -133,7 +131,7 @@ class TinyDB: Closeable {
   override fun close() {
     manifest.close()
     walLogger.close()
-    for (ssTableReader in setOpeningSSTables) {
+    for ((_, ssTableReader) in openingSSTables) {
       ssTableReader.close()
     }
     dbLock.close()
@@ -141,7 +139,7 @@ class TinyDB: Closeable {
 
   @VisibleForTesting
   fun getLevelNFileCount(level: Long): Long {
-    return setOpeningSSTables.count { it.getLevel() == level }.toLong()
+    return openingSSTables.values.count { it.getLevel() == level }.toLong()
   }
 
   private fun internalPut(memTableKey: MemTableKey, memTableValue: MemTableValue) {
@@ -188,7 +186,7 @@ class TinyDB: Closeable {
 
   private fun runCompactionLevel0() {
     val levelOFiles = mutableSetOf<SSTableReader>()
-    for (ssTableReader in setOpeningSSTables) {
+    for ((_, ssTableReader) in openingSSTables) {
       if (ssTableReader.getLevel() == 0L) {
         levelOFiles.add(ssTableReader)
       }
@@ -222,7 +220,7 @@ class TinyDB: Closeable {
   }
 
   private fun runCompactionAtLevel(level: Long): Boolean {
-    val filesAtLevel = setOpeningSSTables.filter { it.getLevel() == level }
+    val filesAtLevel = openingSSTables.values.filter { it.getLevel() == level }
     if (filesAtLevel.isEmpty()) {
       return false
     }
@@ -232,7 +230,7 @@ class TinyDB: Closeable {
       return true
     }
 
-    val nextLevelFiles = setOpeningSSTables.filter { it.getLevel() == level + 1L }.toSet()
+    val nextLevelFiles = openingSSTables.values.filter { it.getLevel() == level + 1L }.toSet()
     val fileScoresAtLevel = filesAtLevel.associateWith { file ->
       return@associateWith nextLevelFiles.count { nextFile ->
         return@count isRangeOverlapping(file.getKeyRange(), nextFile.getKeyRange())
@@ -285,7 +283,7 @@ class TinyDB: Closeable {
 
   private fun selectLevel0CompactionTables(level0Files: Set<SSTableReader>): Set<SSTableReader> {
     val level0Ranges = calculateKeyRange(level0Files)
-    val level1Files = setOpeningSSTables.filter { it.getLevel() == 1L }
+    val level1Files = openingSSTables.values.filter { it.getLevel() == 1L }
     val overlappingFiles = level1Files.filter { file ->
       return@filter isRangeOverlapping(file.getKeyRange(), level0Ranges)
     }
@@ -318,7 +316,7 @@ class TinyDB: Closeable {
   }
 
   private fun performCompaction(compactionInputs: Set<SSTableReader>, targetLevel: Long): BatchOperation {
-    val excludeReaders = setOpeningSSTables.filter { table ->
+    val excludeReaders = openingSSTables.values.filter { table ->
       return@filter !compactionInputs.contains(table)
     }
     val priorityQueue = PriorityQueue(Comparator<Pair<MemTableEntry, Iterator<MemTableEntry>>> { p1, p2 ->

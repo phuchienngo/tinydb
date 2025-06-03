@@ -203,27 +203,37 @@ class CompactionTriggerTest {
         db.put(key, value)
       }
 
-      // Log progress for long-running test
+      // Log progress and give time for background compaction
       if (batch % 10 == 0) {
         val elapsed = System.currentTimeMillis() - startTime
         println("Inserted batch $batch in ${elapsed}ms")
+        Thread.sleep(100) // Allow background compaction to proceed
       }
     }
 
+    // Add some overwrites to stress compaction
+    repeat(200) { i ->
+      val key = "perf_${i % batches}_${i % batchSize}".toByteArray()
+      val newValue = ByteArray(valueSize) { (i % 256).toByte() }
+      db.put(key, newValue)
+    }
+
     val totalTime = System.currentTimeMillis() - startTime
-    val totalEntries = batches * batchSize
+    val totalEntries = batches * batchSize + 200 // Include overwrites
     val entriesPerSecond = (totalEntries * 1000.0 / totalTime).toInt()
 
-    println("Performance: $entriesPerSecond entries/second")
-    Truth.assertThat(entriesPerSecond).isGreaterThan(100) // Minimum performance threshold
+    println("Performance with compaction: $entriesPerSecond entries/second")
+    Truth.assertThat(entriesPerSecond).isGreaterThan(50) // Lower threshold due to compaction overhead
 
-    // Verify random sample of data
-    for (i in 0 until 50) { // Sample 100 random entries
+    // Verify data integrity after compaction stress
+    repeat(50) {
       val randomBatch = (0 until batches).random()
       val randomEntry = (0 until batchSize).random()
       val key = "perf_${randomBatch}_$randomEntry".toByteArray()
+
       val result = db.get(key)
       Truth.assertThat(result).isNotNull()
+      Truth.assertThat(result!!.size).isEqualTo(valueSize)
     }
   }
 }

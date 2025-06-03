@@ -98,7 +98,11 @@ class SSTableReader: Closeable, Iterable<MemTableEntry> {
 
   private fun readBlock(handle: BlockHandle): ByteArray {
     val bytes = ByteArray(handle.size.toInt())
-    randomAccessFile.seek(handle.offset)
+    try {
+      randomAccessFile.seek(handle.offset)
+    } catch (e: Exception) {
+      throw e
+    }
     val readBytes = randomAccessFile.read(bytes)
     Preconditions.checkArgument(readBytes == bytes.size, "Block size mismatch")
     return bytes

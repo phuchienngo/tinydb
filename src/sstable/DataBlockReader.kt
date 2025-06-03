@@ -1,5 +1,6 @@
 package src.sstable
 
+import com.google.common.base.Preconditions
 import com.google.protobuf.ByteString
 import src.proto.memtable.MemTableEntry
 import src.proto.memtable.MemTableKey
@@ -13,9 +14,10 @@ class DataBlockReader: Iterable<MemTableEntry> {
   constructor(blockData: ByteArray) {
     this.blockData = blockData
     val buffer = ByteBuffer.wrap(blockData)
-    buffer.position(blockData.size - 4)
+    buffer.position(blockData.size - Int.SIZE_BYTES)
     val restartCount = buffer.int
-    dataSize = blockData.size - 4 - restartCount * 4
+    Preconditions.checkArgument(restartCount > 0, "Restart count ($restartCount) must be greater than 0")
+    dataSize = blockData.size - Int.SIZE_BYTES - restartCount * Int.SIZE_BYTES
     restartPoints = mutableListOf()
     buffer.position(dataSize)
     for (i in 0 until restartCount) {
@@ -59,7 +61,7 @@ class DataBlockReader: Iterable<MemTableEntry> {
       } else if (cmp > 0) {
         return null
       }
-      offset += entry.serializedSize + 4 // Move to the next entry
+      offset += entry.serializedSize + Int.SIZE_BYTES // Move to the next entry
     }
     return null
   }
@@ -84,7 +86,7 @@ class DataBlockReader: Iterable<MemTableEntry> {
           throw NoSuchElementException("No more entries in the data block")
         }
         val entry = getEntryAtOffset(currentOffset)
-        currentOffset += entry.serializedSize + 4
+        currentOffset += entry.serializedSize + Int.SIZE_BYTES
         return entry
       }
     }
