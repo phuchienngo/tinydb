@@ -6,6 +6,7 @@ import com.google.common.primitives.Longs
 import com.google.protobuf.ByteString
 import src.comparator.MemTableKeyComparator
 import src.config.Config
+import src.lock.DBLock
 import src.manifest.Manifest
 import src.memtable.MemTable
 import src.proto.manifest.BatchOperation

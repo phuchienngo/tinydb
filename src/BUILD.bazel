@@ -3,11 +3,11 @@ load("@rules_kotlin//kotlin:jvm.bzl", "kt_jvm_binary")
 kt_jvm_binary(
     name = "main_app",
     srcs = [
-        "DBLock.kt",
         "TinyDB.kt",
         "comparator/MemTableKeyComparator.kt",
         "comparator/MemTableKeyRangeComparator.kt",
         "config/Config.kt",
+        "lock/DBLock.kt",
         "manifest/Manifest.kt",
         "memtable/MemTable.kt",
         "sstable/BloomFilterBuilder.kt",

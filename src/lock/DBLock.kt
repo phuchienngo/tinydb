@@ -1,4 +1,4 @@
-package src
+package src.lock
 
 import java.io.Closeable
 import java.io.RandomAccessFile
