@@ -20,7 +20,7 @@ class CompactionTriggerTest {
 
   @Before
   fun setUp() {
-    testDir = Files.createTempDirectory("leveldb_compaction_test_").toFile()
+    testDir = Files.createTempDirectory("test_db_compaction_test_").toFile()
     val config = Config(
       dbPath = testDir.toPath(),
       memTableEntriesLimit = 10,

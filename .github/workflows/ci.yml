@@ -26,3 +26,6 @@ jobs:
 
       - name: Test startup
         run: bazel test //test:wal_recovery_test
+
+      - name: Test startup
+        run: bazel test //test:data_block_integration_test

@@ -20,7 +20,7 @@ class WALRecoveryTest {
 
   @Before
   fun setUp() {
-    testDir = Files.createTempDirectory("leveldb_wal_test_").toFile()
+    testDir = Files.createTempDirectory("test_db_wal_test_").toFile()
     config = Config(
       dbPath = testDir.toPath(),
       memTableEntriesLimit = 100,
