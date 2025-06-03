@@ -5,12 +5,15 @@ package test
 import com.google.common.truth.Truth
 import org.junit.After
 import org.junit.Before
+import org.junit.FixMethodOrder
 import org.junit.Test
+import org.junit.runners.MethodSorters
 import src.TinyDB
 import src.config.Config
 import java.io.File
 import java.nio.file.Files
 
+@FixMethodOrder(MethodSorters.JVM)
 class DataBlockIntegrationTest {
   private lateinit var testDir: File
   private lateinit var config: Config

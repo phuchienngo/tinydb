@@ -27,5 +27,8 @@ jobs:
       - name: Test startup
         run: bazel test //test:wal_recovery_test
 
-      - name: Test startup
+      - name: Test data block
         run: bazel test //test:data_block_integration_test
+
+      - name: Test database lock
+        run: bazel test //test:database_lock_test

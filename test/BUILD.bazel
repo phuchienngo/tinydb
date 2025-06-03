@@ -51,3 +51,16 @@ kt_jvm_test(
         "@test//:org_jetbrains_kotlin_kotlin_test",
     ],
 )
+
+kt_jvm_test(
+    name = "database_lock_test",
+    size = "medium",
+    srcs = ["DatabaseLockTest.kt"],
+    test_class = "test.DatabaseLockTest",
+    deps = [
+        "//src:main_app",
+        "@test//:com_google_truth_truth",
+        "@test//:junit_junit",
+        "@test//:org_jetbrains_kotlin_kotlin_test",
+    ],
+)
