@@ -2,6 +2,7 @@ package src
 
 import com.google.common.annotations.VisibleForTesting
 import com.google.common.base.Preconditions
+import com.google.common.collect.Sets
 import com.google.common.primitives.Longs
 import com.google.protobuf.ByteString
 import src.comparator.MemTableKeyComparator
@@ -34,6 +35,7 @@ class TinyDB: Closeable {
   private var walLogger: LogWriter
   private val memTable: MemTable
   private val openingSSTables: MutableMap<Long, SSTableReader>
+  private val openingSSTableByLevel: MutableMap<Long, MutableSet<SSTableReader>>
   private var sequenceNumber: Long
   private val lock: ReentrantLock
 
@@ -52,6 +54,7 @@ class TinyDB: Closeable {
     }
     walLogger = LogWriter(dbPath, manifest, currentBlockOffset)
     openingSSTables = mutableMapOf()
+    openingSSTableByLevel = mutableMapOf()
     openSSTables(dbPath)
   }
 
@@ -62,7 +65,12 @@ class TinyDB: Closeable {
       if (listSSTableIndexes.contains(openingIndex)) {
         continue // Already opened
       }
-      openingSSTables.remove(openingIndex)?.close()
+      val table = openingSSTables.remove(openingIndex) ?: continue
+      openingSSTableByLevel[table.getLevel()]?.remove(table)
+      if (openingSSTableByLevel[table.getLevel()]?.isEmpty() == true) {
+        openingSSTableByLevel.remove(table.getLevel())
+      }
+      table.close()
     }
     for (fileIndex in listSSTableIndexes) {
       if (openingSSTables.containsKey(fileIndex)) {
@@ -70,6 +78,10 @@ class TinyDB: Closeable {
       }
       val ssTableReader = SSTableReader(dbPath, fileIndex)
       openingSSTables.put(fileIndex, ssTableReader)
+      if (!openingSSTableByLevel.containsKey(ssTableReader.getLevel())) {
+        openingSSTableByLevel[ssTableReader.getLevel()] = Sets.newIdentityHashSet()
+      }
+      openingSSTableByLevel[ssTableReader.getLevel()]?.add(ssTableReader)
     }
   }
 
@@ -140,7 +152,7 @@ class TinyDB: Closeable {
 
   @VisibleForTesting
   fun getLevelNFileCount(level: Long): Long {
-    return openingSSTables.values.count { it.getLevel() == level }.toLong()
+    return openingSSTableByLevel[level]?.size?.toLong() ?: 0L
   }
 
   private fun internalPut(memTableKey: MemTableKey, memTableValue: MemTableValue) {
@@ -186,12 +198,7 @@ class TinyDB: Closeable {
   }
 
   private fun runCompactionLevel0() {
-    val levelOFiles = mutableSetOf<SSTableReader>()
-    for ((_, ssTableReader) in openingSSTables) {
-      if (ssTableReader.getLevel() == 0L) {
-        levelOFiles.add(ssTableReader)
-      }
-    }
+    val levelOFiles = openingSSTableByLevel[0] ?: return
     if (levelOFiles.size < config.level0CompactionThreshold) {
       return
     }
@@ -213,7 +220,9 @@ class TinyDB: Closeable {
     manifest.commitChanges(deleteFileLog)
     for (file in compactionInputs) {
       val fileIndex = file.getSSTableIndex()
-      openingSSTables.remove(fileIndex)?.close()
+      val table = openingSSTables.remove(fileIndex) ?: continue
+      openingSSTableByLevel[table.getLevel()]?.remove(table)
+      table.close()
       Preconditions.checkArgument(
         config.dbPath.resolve("$fileIndex.sst").deleteIfExists(),
         "Failed to delete SSTable file: $fileIndex.sst"
@@ -223,7 +232,7 @@ class TinyDB: Closeable {
   }
 
   private fun runCompactionAtLevel(level: Long): Boolean {
-    val filesAtLevel = openingSSTables.values.filter { it.getLevel() == level }
+    val filesAtLevel = openingSSTableByLevel[level] ?: return false
     if (filesAtLevel.isEmpty()) {
       return false
     }
@@ -233,7 +242,7 @@ class TinyDB: Closeable {
       return true
     }
 
-    val nextLevelFiles = openingSSTables.values.filter { it.getLevel() == level + 1L }.toSet()
+    val nextLevelFiles = openingSSTableByLevel[level + 1L] ?: emptySet()
     val fileScoresAtLevel = filesAtLevel.associateWith { file ->
       return@associateWith nextLevelFiles.count { nextFile ->
         return@count isRangeOverlapping(file.getKeyRange(), nextFile.getKeyRange())
@@ -244,7 +253,7 @@ class TinyDB: Closeable {
       .thenBy { it.getSSTableIndex() })
 
     var selectedSize = 0L
-    val levelNFiles = mutableSetOf<SSTableReader>()
+    val levelNFiles = Sets.newIdentityHashSet<SSTableReader>()
     for (file in sortedFiles) {
       levelNFiles.add(file)
       if (file.getLevel() != level) {
@@ -262,7 +271,7 @@ class TinyDB: Closeable {
   }
 
   private fun selectLevelNCompactionFiles(selectedFiles: Set<SSTableReader>, nextLevelFiles: Set<SSTableReader>): Set<SSTableReader> {
-    val compactionInputs = mutableSetOf<SSTableReader>()
+    val compactionInputs = Sets.newIdentityHashSet<SSTableReader>()
     val keyRanges = calculateKeyRange(selectedFiles)
     compactionInputs.addAll(selectedFiles)
     for (nextLevelFile in nextLevelFiles) {
@@ -286,7 +295,7 @@ class TinyDB: Closeable {
 
   private fun selectLevel0CompactionTables(level0Files: Set<SSTableReader>): Set<SSTableReader> {
     val level0Ranges = calculateKeyRange(level0Files)
-    val level1Files = openingSSTables.values.filter { it.getLevel() == 1L }
+    val level1Files = openingSSTableByLevel[1L] ?: emptySet()
     val overlappingFiles = level1Files.filter { file ->
       return@filter isRangeOverlapping(file.getKeyRange(), level0Ranges)
     }
