@@ -24,6 +24,9 @@ import src.wal.LogWriter
 import java.io.Closeable
 import java.nio.file.Path
 import java.util.PriorityQueue
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 import kotlin.io.path.deleteIfExists
@@ -38,6 +41,7 @@ class TinyDB: Closeable {
   private val openingSSTableByLevel: MutableMap<Long, MutableSet<SSTableReader>>
   private var sequenceNumber: Long
   private val lock: ReentrantLock
+  private val scheduledExecutor: ScheduledExecutorService
 
   constructor(config: Config) {
     this.config = config
@@ -56,6 +60,12 @@ class TinyDB: Closeable {
     openingSSTables = mutableMapOf()
     openingSSTableByLevel = mutableMapOf()
     openSSTables(dbPath)
+    scheduledExecutor = Executors.newSingleThreadScheduledExecutor()
+    scheduledExecutor.scheduleWithFixedDelay({
+      lock.withLock {
+        runCompaction()
+      }
+    }, 1, 1, TimeUnit.SECONDS)
   }
 
   private fun openSSTables(dbPath: Path) {
@@ -142,6 +152,13 @@ class TinyDB: Closeable {
   }
 
   override fun close() {
+    scheduledExecutor.shutdown()
+    try {
+      scheduledExecutor.awaitTermination(30, TimeUnit.SECONDS)
+    } catch (_: InterruptedException) {
+      scheduledExecutor.shutdownNow()
+      Thread.currentThread().interrupt()
+    }
     manifest.close()
     walLogger.close()
     for ((_, ssTableReader) in openingSSTables) {
@@ -163,7 +180,7 @@ class TinyDB: Closeable {
       return
     }
     writeMemTableToSSTable()
-    runCompaction()
+//    runCompaction()
   }
 
   private fun writeMemTableToSSTable() {

@@ -59,6 +59,7 @@ class CompactionTriggerTest {
     db.put("trigger_compaction".toByteArray(), "trigger_value".toByteArray())
 
     // Verify that compaction was triggered by checking level 0 file count
+    Thread.sleep(2000)
     val level0FileCount = db.getLevelNFileCount(0) // You'll need this method
     Truth.assertThat(level0FileCount).isLessThan(filesNeeded)
 
