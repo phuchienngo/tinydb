@@ -1,7 +1,3 @@
-# TinyDB
-
-A lightweight, embedded key-value store database implemented in Kotlin.
-
 ## Overview
 
 TinyDB is a custom key-value database inspired by LSM-tree (Log-Structured Merge Tree) based databases. It provides a simple but efficient storage solution with features including write-ahead logging, sorted string tables (SSTables), and efficient data retrieval mechanisms.
